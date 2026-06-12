@@ -15,6 +15,7 @@ from kb.store import load_config
 
 PROFILES: dict[str, dict[str, Any]] = {
     "lite": {
+        "profile": "lite",
         "database": {"vector_dimension": 384},
         "embedding": {"model_name": "sentence-transformers/all-MiniLM-L6-v2", "batch_size": 8},
         "parsing": {"ocr": {"enabled": False}, "office": {"extract_images": False}},
@@ -28,6 +29,7 @@ PROFILES: dict[str, dict[str, Any]] = {
         },
     },
     "balanced": {
+        "profile": "balanced",
         "database": {"vector_dimension": 1024},
         "embedding": {"model_name": "BAAI/bge-m3", "batch_size": 4},
         "parsing": {"ocr": {"enabled": False}, "office": {"extract_images": False}},
@@ -41,6 +43,7 @@ PROFILES: dict[str, dict[str, Any]] = {
         },
     },
     "accurate": {
+        "profile": "accurate",
         "database": {"vector_dimension": 1024},
         "embedding": {"model_name": "BAAI/bge-m3", "batch_size": 4},
         "parsing": {"ocr": {"enabled": False}, "office": {"extract_images": False}},

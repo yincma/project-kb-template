@@ -155,6 +155,7 @@ class RetrievalConfig(BaseModel):
 
 
 class ProjectKBConfig(BaseModel):
+    profile: Literal["lite", "balanced", "accurate"] = "balanced"
     project_root: str = "."
     path_base: Literal["config_dir", "project_root", "cwd"] = "config_dir"
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)

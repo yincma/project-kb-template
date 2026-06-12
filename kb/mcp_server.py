@@ -54,6 +54,7 @@ def kb_status() -> dict[str, Any]:
     return {
         "name": "project-kb",
         "read_only": os.environ.get("KB_READ_ONLY", "true").lower() == "true",
+        "profile": cfg.profile,
         "project_root": str(cfg.root_path),
         "db_path": str(cfg.db_path),
         "table_name": cfg.database.table_name,

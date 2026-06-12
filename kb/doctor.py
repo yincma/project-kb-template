@@ -41,6 +41,7 @@ def doctor_project(config_path: str | Path = "kb/config.yaml") -> dict[str, Any]
 
     return {
         **diagnose,
+        "profile": cfg.profile,
         "config_exists": Path(config_path).exists(),
         "fts_index": _index_status(store, "fts"),
         "vector_index": _index_status(store, "vector"),
@@ -66,6 +67,7 @@ def print_doctor(payload: dict[str, Any]) -> None:
     table.add_column("Value")
     for key in (
         "config_exists",
+        "profile",
         "table_exists",
         "schema_version",
         "row_count",
