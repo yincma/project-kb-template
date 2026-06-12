@@ -2,6 +2,60 @@
 
 复制这个模板到任意项目根目录，把资料放进 `docs/`，重建索引后即可用命令行、Codex MCP 或 Kiro MCP 查询项目资料。
 
+## 前置条件
+
+需要：
+
+```text
+Python >= 3.11
+uv
+Git
+网络连接
+至少 10GB 可用磁盘空间
+```
+
+首次安装会从 PyPI 下载 Python 依赖，并从 Hugging Face 下载本地模型：
+
+```text
+BAAI/bge-m3
+BAAI/bge-reranker-v2-m3
+RapidOCR OCR 模型
+```
+
+这些模型下载完成后会使用本地缓存。知识库索引、OCR、reranker 都在本地运行。
+
+安装 `uv`：
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows PowerShell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+如果机器没有合适的 Python，可以让 `uv` 安装：
+
+```bash
+uv python install 3.11
+```
+
+## 给 AI 的安装任务
+
+让 AI 在项目根目录执行：
+
+```bash
+uv sync --extra ocr
+uv run python kb/diagnose.py --config kb/config.yaml
+mkdir -p docs
+```
+
+如果要接入 Codex 或 Kiro，再确认 MCP 配置文件存在：
+
+```bash
+ls .codex/config.toml .kiro/settings/mcp.json AGENTS.md
+```
+
 ## 目录结构
 
 ```text
@@ -18,14 +72,6 @@ project-root/
 ├── .env.example
 └── .gitignore
 ```
-
-## 安装
-
-```bash
-uv sync --extra ocr
-```
-
-首次运行会下载本地 embedding/reranker 模型。下载完成后，索引和查询都在本地运行。
 
 ## 放入资料
 
