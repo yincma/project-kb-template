@@ -5,10 +5,15 @@ cwd = "."
 enabled = true
 startup_timeout_sec = 30
 tool_timeout_sec = 120
-enabled_tools = ["kb_status", "search_project_kb", "read_kb_source"]
+enabled_tools = ["kb_status", "search_project_kb", "search_project_kb_fast", "search_project_kb_deep", "read_kb_source"]
 
 [mcp_servers."project-kb".env]
 KB_CONFIG = "kb/config.yaml"
 KB_DB_PATH = ".lancedb"
 KB_READ_ONLY = "true"
-
+TOKENIZERS_PARALLELISM = "false"
+OMP_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"
+OPENBLAS_NUM_THREADS = "1"
+VECLIB_MAXIMUM_THREADS = "1"
+NUMEXPR_NUM_THREADS = "1"

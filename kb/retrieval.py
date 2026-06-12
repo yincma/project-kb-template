@@ -27,26 +27,50 @@ class ProjectRetriever:
         query: str,
         *,
         top_k: int | None = None,
+        candidate_k: int | None = None,
         source_filter: str | None = None,
         rerank: bool = True,
+        high_precision: bool | None = None,
+        include_text: bool = False,
     ) -> dict[str, Any]:
         with self._query_semaphore:
-            return self._search_locked(query, top_k=top_k, source_filter=source_filter, rerank=rerank)
+            return self._search_locked(
+                query,
+                top_k=top_k,
+                candidate_k=candidate_k,
+                source_filter=source_filter,
+                rerank=rerank,
+                high_precision=high_precision,
+                include_text=include_text,
+            )
 
     def _search_locked(
         self,
         query: str,
         *,
         top_k: int | None = None,
+        candidate_k: int | None = None,
         source_filter: str | None = None,
         rerank: bool = True,
+        high_precision: bool | None = None,
+        include_text: bool = False,
     ) -> dict[str, Any]:
         top_k = int(top_k or self.config.retrieval.top_k)
-        candidate_k = self._candidate_k(top_k)
+        use_high_precision = self.config.retrieval.high_precision if high_precision is None else bool(high_precision)
+        candidate_k = self._candidate_k(top_k, candidate_k, use_high_precision)
         if hasattr(self.store, "count_rows"):
             row_count = self.store.count_rows()
             if row_count == 0:
-                return self._payload(query, top_k, candidate_k, [], [], reranker="none", post_ranking="none")
+                return self._payload(
+                    query,
+                    top_k,
+                    candidate_k,
+                    [],
+                    [],
+                    reranker="none",
+                    post_ranking="none",
+                    include_text=include_text,
+                )
 
         query_vector = self.embedder.embed_query(query)
         table = self.store.open_table()
@@ -63,7 +87,7 @@ class ProjectRetriever:
         post_ranking = "domain_boost" if self.config.retrieval.boosts.enabled else "none"
         reranker_used = "rrf" if rerank else "none"
 
-        if self._should_high_precision(rerank):
+        if self._should_high_precision(rerank, use_high_precision):
             rerank_top_k = max(top_k, int(self.config.retrieval.rerank_top_k or top_k))
             pool = ranked_rows[:rerank_top_k]
             remainder = ranked_rows[rerank_top_k:]
@@ -83,20 +107,17 @@ class ProjectRetriever:
             ranked_rows[:top_k],
             reranker=reranker_used,
             post_ranking=post_ranking,
+            include_text=include_text,
         )
 
-    def _candidate_k(self, top_k: int) -> int:
-        candidate_k = max(top_k, int(self.config.retrieval.candidate_k or top_k))
-        if self._should_high_precision(True):
+    def _candidate_k(self, top_k: int, candidate_k: int | None, high_precision: bool) -> int:
+        candidate_k = max(top_k, int(candidate_k or self.config.retrieval.candidate_k or top_k))
+        if self._should_high_precision(True, high_precision):
             candidate_k = max(candidate_k, int(self.config.retrieval.rerank_top_k or top_k))
         return candidate_k
 
-    def _should_high_precision(self, rerank: bool) -> bool:
-        return bool(
-            rerank
-            and self.config.retrieval.high_precision
-            and (self.config.retrieval.reranker or "").lower() == "bge_cross_encoder"
-        )
+    def _should_high_precision(self, rerank: bool, high_precision: bool) -> bool:
+        return bool(rerank and high_precision)
 
     def _get_high_precision_reranker(self) -> "BGEHighPrecisionReranker":
         if self._high_precision_reranker is None:
@@ -113,6 +134,7 @@ class ProjectRetriever:
         *,
         reranker: str,
         post_ranking: str,
+        include_text: bool,
     ) -> dict[str, Any]:
         return {
             "query": query,
@@ -122,7 +144,10 @@ class ProjectRetriever:
             "reranker": reranker,
             "post_ranking": post_ranking,
             "warnings": warnings_list,
-            "results": [format_result(row, query, self.config.retrieval.max_snippet_chars) for row in rows],
+            "results": [
+                format_result(row, query, self.config.retrieval.max_snippet_chars, include_text=include_text)
+                for row in rows
+            ],
         }
 
     def _hybrid_search(
@@ -136,16 +161,9 @@ class ProjectRetriever:
         rerank: bool,
         warnings_list: list[str],
     ) -> list[dict[str, Any]]:
-        primary_rows = _builder_to_rows(
-            self._hybrid_builder(table, query, query_vector, source_filter, rerank, warnings_list).limit(top_k)
-        )
-        if candidate_k <= top_k:
-            return primary_rows
-
-        candidate_rows = _builder_to_rows(
+        return _builder_to_rows(
             self._hybrid_builder(table, query, query_vector, source_filter, rerank, warnings_list).limit(candidate_k)
         )
-        return primary_rows + candidate_rows
 
     def _hybrid_builder(
         self,
@@ -177,11 +195,7 @@ class ProjectRetriever:
         candidate_k: int,
         source_filter: str | None,
     ) -> list[dict[str, Any]]:
-        primary_rows = _builder_to_rows(self._vector_builder(table, query_vector, source_filter).limit(top_k))
-        if candidate_k <= top_k:
-            return primary_rows
-        candidate_rows = _builder_to_rows(self._vector_builder(table, query_vector, source_filter).limit(candidate_k))
-        return primary_rows + candidate_rows
+        return _builder_to_rows(self._vector_builder(table, query_vector, source_filter).limit(candidate_k))
 
     def _vector_builder(self, table, query_vector: list[float], source_filter: str | None):
         builder = table.search(query_vector)
@@ -296,7 +310,7 @@ def _row_quality(row: dict[str, Any]) -> tuple[int, int, int]:
     )
 
 
-def format_result(row: dict[str, Any], query: str, max_snippet_chars: int) -> dict[str, Any]:
+def format_result(row: dict[str, Any], query: str, max_snippet_chars: int, *, include_text: bool = False) -> dict[str, Any]:
     text = str(row.get("text") or "")
     metadata = _parse_metadata(row.get("metadata_json"))
     page_number = _field_or_metadata(row, metadata, "page_number")
@@ -305,7 +319,7 @@ def format_result(row: dict[str, Any], query: str, max_snippet_chars: int) -> di
     cell_range = _field_or_metadata(row, metadata, "cell_range")
     row_range = _field_or_metadata(row, metadata, "row_range")
     ocr_used = _field_or_metadata(row, metadata, "ocr_used")
-    return {
+    result = {
         "score": _score_from_row(row),
         "source_path": row.get("source_path"),
         "heading": row.get("heading") or None,
@@ -317,10 +331,12 @@ def format_result(row: dict[str, Any], query: str, max_snippet_chars: int) -> di
         "cell_range": cell_range or None,
         "ocr_used": bool(ocr_used) if ocr_used is not None else None,
         "snippet": make_snippet(text, query, max_snippet_chars),
-        "text": text,
         "metadata": metadata,
         "ranking_signals": row.get("_ranking_signals", []),
     }
+    if include_text:
+        result["text"] = text
+    return result
 
 
 def make_snippet(text: str, query: str, max_chars: int = 500) -> str:

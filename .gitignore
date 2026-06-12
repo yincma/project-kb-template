@@ -1,4 +1,5 @@
 .lancedb/
+.kb_cache/
 .venv/
 .env
 .DS_Store

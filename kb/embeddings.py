@@ -5,7 +5,11 @@ import warnings
 
 
 class BGEEmbedder:
-    """Lazy local BGE-M3 embedding wrapper."""
+    """Lazy local embedding wrapper.
+
+    BGE-M3 uses FlagEmbedding for dense vectors. Lightweight profiles can use
+    SentenceTransformers models such as all-MiniLM-L6-v2.
+    """
 
     def __init__(
         self,
@@ -20,6 +24,7 @@ class BGEEmbedder:
         self.device = device
         self.use_fp16 = use_fp16
         self._model = None
+        self._backend: str | None = None
 
     def embed_query(self, text: str) -> list[float]:
         vectors = self.embed_texts([text])
@@ -32,19 +37,37 @@ class BGEEmbedder:
         all_vectors: list[list[float]] = []
         for start in range(0, len(texts), self.batch_size):
             batch = list(texts[start : start + self.batch_size])
-            encoded = model.encode(
-                batch,
-                batch_size=self.batch_size,
-                return_dense=True,
-                return_sparse=False,
-                return_colbert_vecs=False,
-            )
+            if self._backend == "sentence-transformers":
+                encoded = model.encode(batch, batch_size=self.batch_size, normalize_embeddings=True)
+            else:
+                encoded = model.encode(
+                    batch,
+                    batch_size=self.batch_size,
+                    return_dense=True,
+                    return_sparse=False,
+                    return_colbert_vecs=False,
+                )
             dense = encoded["dense_vecs"] if isinstance(encoded, dict) else encoded
             all_vectors.extend(_to_list_vectors(dense))
         return all_vectors
 
     def _load_model(self):
         if self._model is not None:
+            return self._model
+
+        if _is_sentence_transformers_model(self.model_name):
+            try:
+                from sentence_transformers import SentenceTransformer
+            except Exception as exc:
+                raise RuntimeError(
+                    "sentence-transformers is required for lightweight embeddings. "
+                    "Install dependencies with `uv sync`."
+                ) from exc
+            kwargs = {}
+            if self.device:
+                kwargs["device"] = self.device
+            self._model = SentenceTransformer(self.model_name, **kwargs)
+            self._backend = "sentence-transformers"
             return self._model
 
         try:
@@ -70,6 +93,7 @@ class BGEEmbedder:
                 warnings.warn("This FlagEmbedding version does not accept `devices`; retrying without it.")
                 kwargs.pop("devices", None)
             self._model = BGEM3FlagModel(self.model_name, **kwargs)
+        self._backend = "bge-m3"
         return self._model
 
 
@@ -87,3 +111,7 @@ def _to_list_vectors(vectors) -> list[list[float]]:
         vectors = vectors.tolist()
     return [[float(value) for value in vector] for vector in vectors]
 
+
+def _is_sentence_transformers_model(model_name: str) -> bool:
+    normalized = model_name.lower()
+    return "all-minilm" in normalized or normalized.startswith("sentence-transformers/")

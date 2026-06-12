@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 import os
 import sys
@@ -11,14 +12,15 @@ if __package__ is None or __package__ == "":
 from mcp.server.fastmcp import FastMCP
 
 from kb.embeddings import BGEEmbedder
-from kb.parsers import SUPPORTED_EXTENSIONS, parse_file
+from kb.parsers import SUPPORTED_EXTENSIONS
 from kb.parsers.ocr import ocr_dependency_status
 from kb.retrieval import ProjectRetriever, reranker_dependency_status
-from kb.store import LanceDBStore, load_config
+from kb.store import LanceDBStore, extracted_cache_path, load_config
 
 
 mcp = FastMCP("project-kb")
 _RUNTIME_CACHE: dict[tuple[str | None, str | None, str | None], tuple[Any, Any, Any]] = {}
+BINARY_SOURCE_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
 
 
 def _load_runtime():
@@ -79,35 +81,59 @@ def kb_status() -> dict[str, Any]:
 @mcp.tool()
 def search_project_kb(
     query: str,
-    top_k: int = 8,
+    top_k: int = 5,
     source_filter: str | None = None,
-    rerank: bool = True,
 ) -> dict[str, Any]:
-    """Search the local project knowledge base using read-only hybrid retrieval."""
-    _, _, retriever = _load_runtime()
-    payload = retriever.search(query, top_k=top_k, source_filter=source_filter, rerank=rerank)
-    payload["citations"] = [
-        _citation_for_result(
-            {
-                "source_path": result["source_path"],
-                "heading": result["heading"],
-                "chunk_index": result["chunk_index"],
-                "snippet": result["snippet"],
-                "text": result["text"],
-                "page_number": result.get("page_number"),
-                "slide_number": result.get("slide_number"),
-                "sheet_name": result.get("sheet_name"),
-                "cell_range": result.get("cell_range"),
-                "ocr_used": result.get("ocr_used"),
-            }
-        )
-        for result in payload["results"]
-    ]
-    return payload
+    """Alias for fast read-only project knowledge-base search."""
+    return search_project_kb_fast(query=query, top_k=top_k, source_filter=source_filter)
 
 
 @mcp.tool()
-def read_kb_source(source_path: str, max_chars: int = 12000) -> dict[str, Any]:
+def search_project_kb_fast(
+    query: str,
+    top_k: int = 5,
+    source_filter: str | None = None,
+) -> dict[str, Any]:
+    """Fast local project KB search using hybrid retrieval and RRF. Returns snippets, not full text."""
+    _, _, retriever = _load_runtime()
+    payload = retriever.search(
+        query,
+        top_k=top_k,
+        candidate_k=20,
+        source_filter=source_filter,
+        rerank=True,
+        high_precision=False,
+        include_text=False,
+    )
+    payload["profile"] = "fast"
+    payload["citations"] = [_citation_for_result(result) for result in payload["results"]]
+    return _strip_result_text(payload)
+
+
+@mcp.tool()
+def search_project_kb_deep(
+    query: str,
+    top_k: int = 8,
+    source_filter: str | None = None,
+) -> dict[str, Any]:
+    """Deeper local project KB search using larger recall and BGE cross-encoder reranking. Returns snippets, not full text."""
+    _, _, retriever = _load_runtime()
+    payload = retriever.search(
+        query,
+        top_k=top_k,
+        candidate_k=50,
+        source_filter=source_filter,
+        rerank=True,
+        high_precision=True,
+        include_text=False,
+    )
+    payload["profile"] = "deep"
+    payload["citations"] = [_citation_for_result(result) for result in payload["results"]]
+    return _strip_result_text(payload)
+
+
+@mcp.tool()
+def read_kb_source(source_path: str, max_chars: int = 6000) -> dict[str, Any]:
     """Read a bounded amount of a source file from the project root."""
     cfg, _, _ = _load_runtime()
     max_chars = max(1, min(int(max_chars), cfg.retrieval.max_return_chars))
@@ -120,9 +146,14 @@ def read_kb_source(source_path: str, max_chars: int = 12000) -> dict[str, Any]:
     if not resolved.exists() or not resolved.is_file():
         return {"error": "source file does not exist", "source_path": source_path}
 
-    if resolved.suffix.lower() in {".pdf", ".docx", ".pptx", ".xlsx"}:
-        parsed = parse_file(resolved, config=cfg)
-        text = parsed.text if parsed else ""
+    if resolved.suffix.lower() in BINARY_SOURCE_EXTENSIONS:
+        cache_path = extracted_cache_path(cfg, _file_sha256(resolved))
+        if not cache_path.exists():
+            return {
+                "error": "extracted cache is missing; rebuild the index before reading binary sources",
+                "source_path": source_path,
+            }
+        text = cache_path.read_text(encoding="utf-8", errors="replace")
     else:
         text = resolved.read_text(encoding="utf-8", errors="replace")
     truncated = len(text) > max_chars
@@ -135,7 +166,37 @@ def read_kb_source(source_path: str, max_chars: int = 12000) -> dict[str, Any]:
 
 
 def _citation_for_result(result: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in result.items() if value not in (None, "")}
+    citation = {
+        "source_path": result.get("source_path"),
+        "heading": result.get("heading"),
+        "chunk_index": result.get("chunk_index"),
+        "score": result.get("score"),
+        "snippet": result.get("snippet"),
+        "metadata": _compact_metadata(result),
+    }
+    return {key: value for key, value in citation.items() if value not in (None, "", {})}
+
+
+def _compact_metadata(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: result.get(key)
+        for key in ("page_number", "slide_number", "sheet_name", "row_range", "cell_range", "ocr_used")
+        if result.get(key) not in (None, "")
+    }
+
+
+def _strip_result_text(payload: dict[str, Any]) -> dict[str, Any]:
+    for result in payload.get("results", []):
+        result.pop("text", None)
+    return payload
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for block in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 if __name__ == "__main__":

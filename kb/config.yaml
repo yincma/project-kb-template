@@ -6,6 +6,7 @@ database:
   table_name: "project_kb"
   manifest_path: ".lancedb/manifest.json"
   vector_dimension: 1024
+  extracted_cache_dir: ".kb_cache/extracted"
 
 scan:
   source_dirs:
@@ -20,6 +21,7 @@ scan:
     - "build/**"
     - "__pycache__/**"
     - ".lancedb/**"
+    - ".kb_cache/**"
     - ".codex/**"
 
 chunking:
@@ -28,30 +30,30 @@ chunking:
 
 embedding:
   model_name: "BAAI/bge-m3"
-  batch_size: 16
+  batch_size: 4
   device: null
   use_fp16: null
 
 parsing:
   ocr:
-    enabled: true
+    enabled: false
     engine: "rapidocr"
     min_text_chars_per_page: 30
     max_pages_per_file: 300
     image_dpi: 180
     languages: ["ch", "en"]
   office:
-    extract_images: true
+    extract_images: false
     extract_notes: true
     max_sheet_rows: 20000
 
 retrieval:
   mode: "hybrid"
-  top_k: 8
-  candidate_k: 50
+  top_k: 5
+  candidate_k: 20
   max_concurrent_queries: 1
-  high_precision: true
-  reranker: "bge_cross_encoder"
+  high_precision: false
+  reranker: "rrf"
   reranker_model_name: "BAAI/bge-reranker-v2-m3"
   rerank_top_k: 40
   fallback_reranker: "rrf"
@@ -86,5 +88,5 @@ retrieval:
         query_terms: ["scope", "需求", "范围", "mvp", "out of scope", "不属于"]
         source_globs: ["*/需求/*", "*/requirements/*", "*scope*"]
         weight: 0.06
-  max_snippet_chars: 500
-  max_return_chars: 12000
+  max_snippet_chars: 320
+  max_return_chars: 6000

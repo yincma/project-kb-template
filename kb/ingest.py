@@ -20,23 +20,48 @@ if __package__ is None or __package__ == "":
 from kb.chunking import chunk_parsed_document
 from kb.embeddings import BGEEmbedder
 from kb.parsers import parse_file
-from kb.store import STORE_SCHEMA_VERSION, LanceDBStore, load_config, load_manifest, save_manifest, utc_now_iso
+from kb.store import (
+    STORE_SCHEMA_VERSION,
+    LanceDBStore,
+    extracted_cache_path,
+    load_config,
+    load_manifest,
+    save_manifest,
+    utc_now_iso,
+)
 
 
-DEFAULT_EXCLUDED_DIR_NAMES = {".git", ".venv", "node_modules", "dist", "build", "__pycache__", ".lancedb", ".codex"}
+DEFAULT_EXCLUDED_DIR_NAMES = {
+    ".git",
+    ".venv",
+    "node_modules",
+    "dist",
+    "build",
+    "__pycache__",
+    ".lancedb",
+    ".kb_cache",
+    ".codex",
+}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Index project documents into local LanceDB.")
     parser.add_argument("--config", default=None, help="Path to kb/config.yaml")
     parser.add_argument("--rebuild", action="store_true", help="Delete and rebuild the local index")
+    parser.add_argument("--rebuild-fts", action="store_true", help="Rebuild the full-text search index")
     args = parser.parse_args()
 
     console = Console()
-    index_project(args.config, rebuild=args.rebuild, console=console)
+    index_project(args.config, rebuild=args.rebuild, rebuild_fts=args.rebuild_fts, console=console)
 
 
-def index_project(config_path: str | Path | None = None, *, rebuild: bool = False, console: Console | None = None) -> dict[str, Any]:
+def index_project(
+    config_path: str | Path | None = None,
+    *,
+    rebuild: bool = False,
+    rebuild_fts: bool = False,
+    console: Console | None = None,
+) -> dict[str, Any]:
     console = console or Console()
     started = time.perf_counter()
     cfg = load_config(config_path)
@@ -91,6 +116,8 @@ def index_project(config_path: str | Path | None = None, *, rebuild: bool = Fals
                 console.print(f"[yellow]{warning}[/yellow]")
             continue
 
+        write_extracted_cache(cfg, sha256, parsed.text)
+
         for warning in parsed.warnings:
             warning_count += 1
             console.print(f"[yellow]{warning}[/yellow]")
@@ -128,12 +155,13 @@ def index_project(config_path: str | Path | None = None, *, rebuild: bool = Fals
             "sha256": sha256,
             "modified_time": modified_time,
             "chunk_count": len(rows),
+            "extracted_cache_path": _display_path(extracted_cache_path(cfg, sha256), cfg.root_path),
             "indexed_at": indexed_at,
         }
         indexed_files += 1
         chunk_count += len(rows)
 
-    fts_warning = store.ensure_fts_index()
+    fts_warning = store.ensure_fts_index(replace=bool(rebuild or rebuild_fts))
     if fts_warning:
         warning_count += 1
         console.print(f"[yellow]{fts_warning}[/yellow]")
@@ -191,6 +219,20 @@ def file_sha256(path: Path) -> str:
         for block in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def write_extracted_cache(cfg, sha256: str, text: str) -> Path:
+    path = extracted_cache_path(cfg, sha256)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", errors="replace")
+    return path
+
+
+def _display_path(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def row_for_chunk(

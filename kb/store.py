@@ -18,6 +18,7 @@ DEFAULT_EXCLUDES = [
     "build/**",
     "__pycache__/**",
     ".lancedb/**",
+    ".kb_cache/**",
     ".codex/**",
 ]
 
@@ -40,6 +41,7 @@ class DatabaseConfig(BaseModel):
     table_name: str = "project_kb"
     manifest_path: str = ".lancedb/manifest.json"
     vector_dimension: int = 1024
+    extracted_cache_dir: str = ".kb_cache/extracted"
 
 
 class ScanConfig(BaseModel):
@@ -55,13 +57,13 @@ class ChunkingConfig(BaseModel):
 
 class EmbeddingConfig(BaseModel):
     model_name: str = "BAAI/bge-m3"
-    batch_size: int = 16
+    batch_size: int = 4
     device: str | None = None
     use_fp16: bool | None = None
 
 
 class OCRConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     engine: str = "rapidocr"
     min_text_chars_per_page: int = 30
     max_pages_per_file: int = 300
@@ -70,7 +72,7 @@ class OCRConfig(BaseModel):
 
 
 class OfficeParsingConfig(BaseModel):
-    extract_images: bool = True
+    extract_images: bool = False
     extract_notes: bool = True
     max_sheet_rows: int = 20000
 
@@ -139,17 +141,17 @@ class BoostConfig(BaseModel):
 
 class RetrievalConfig(BaseModel):
     mode: str = "hybrid"
-    top_k: int = 8
-    candidate_k: int = 50
+    top_k: int = 5
+    candidate_k: int = 20
     max_concurrent_queries: int = 1
-    reranker: str = "bge_cross_encoder"
-    high_precision: bool = True
+    reranker: str = "rrf"
+    high_precision: bool = False
     reranker_model_name: str = "BAAI/bge-reranker-v2-m3"
     rerank_top_k: int = 40
     fallback_reranker: str = "rrf"
     boosts: BoostConfig = Field(default_factory=BoostConfig)
-    max_snippet_chars: int = 500
-    max_return_chars: int = 12000
+    max_snippet_chars: int = 320
+    max_return_chars: int = 6000
 
 
 class ProjectKBConfig(BaseModel):
@@ -181,6 +183,11 @@ class ProjectKBConfig(BaseModel):
     @property
     def manifest_path(self) -> Path:
         path = Path(self.database.manifest_path)
+        return path if path.is_absolute() else self.root_path / path
+
+    @property
+    def extracted_cache_dir(self) -> Path:
+        path = Path(self.database.extracted_cache_dir)
         return path if path.is_absolute() else self.root_path / path
 
 
@@ -339,12 +346,14 @@ class LanceDBStore:
         quoted = ", ".join(_sql_quote(path) for path in source_paths)
         self.open_table().delete(f"source_path IN ({quoted})")
 
-    def ensure_fts_index(self) -> str | None:
+    def ensure_fts_index(self, *, replace: bool = False) -> str | None:
         try:
             table = self.open_or_create_table()
-            table.create_fts_index("text", replace=True)
+            table.create_fts_index("text", replace=replace)
             return None
         except Exception as exc:
+            if not replace and _looks_like_existing_index_error(exc):
+                return None
             return f"Could not create LanceDB full-text index: {exc}"
 
     def count_rows(self) -> int | None:
@@ -416,8 +425,17 @@ def save_manifest(config: ProjectKBConfig, manifest: dict[str, Any]) -> None:
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def extracted_cache_path(config: ProjectKBConfig, sha256: str) -> Path:
+    return config.extracted_cache_dir / f"{sha256}.txt"
+
+
 def _sql_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def _looks_like_existing_index_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "already exists" in message or "exists" in message or "duplicate" in message
 
 
 def _arrowish_to_rows(value: Any) -> list[dict[str, Any]]:
