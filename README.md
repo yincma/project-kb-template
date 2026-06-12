@@ -56,6 +56,15 @@ mkdir -p docs
 ls .codex/config.toml .kiro/settings/mcp.json AGENTS.md
 ```
 
+默认查询并发已经限制为 1：
+
+```yaml
+retrieval:
+  max_concurrent_queries: 1
+```
+
+这个限制作用于同一个 MCP server 进程内的完整查询流程，包括 query embedding、LanceDB hybrid/vector search 和 reranker。多个独立终端进程不会共享这个锁。
+
 ## 目录结构
 
 ```text

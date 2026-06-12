@@ -60,6 +60,7 @@ def kb_status() -> dict[str, Any]:
         "row_count": store.count_rows(),
         "embedding_model": cfg.embedding.model_name,
         "retriever": cfg.retrieval.mode,
+        "max_concurrent_queries": cfg.retrieval.max_concurrent_queries,
         "high_precision": cfg.retrieval.high_precision,
         "reranker": cfg.retrieval.reranker,
         "reranker_model": cfg.retrieval.reranker_model_name,

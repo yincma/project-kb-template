@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 import importlib.util
 import json
+from threading import BoundedSemaphore
 from typing import Any
 import warnings
 
@@ -19,8 +20,20 @@ class ProjectRetriever:
         self.store = store
         self.embedder = embedder
         self._high_precision_reranker: BGEHighPrecisionReranker | None = None
+        self._query_semaphore = BoundedSemaphore(max(1, int(config.retrieval.max_concurrent_queries or 1)))
 
     def search(
+        self,
+        query: str,
+        *,
+        top_k: int | None = None,
+        source_filter: str | None = None,
+        rerank: bool = True,
+    ) -> dict[str, Any]:
+        with self._query_semaphore:
+            return self._search_locked(query, top_k=top_k, source_filter=source_filter, rerank=rerank)
+
+    def _search_locked(
         self,
         query: str,
         *,

@@ -141,6 +141,7 @@ class RetrievalConfig(BaseModel):
     mode: str = "hybrid"
     top_k: int = 8
     candidate_k: int = 50
+    max_concurrent_queries: int = 1
     reranker: str = "bge_cross_encoder"
     high_precision: bool = True
     reranker_model_name: str = "BAAI/bge-reranker-v2-m3"

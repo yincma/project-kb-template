@@ -49,6 +49,7 @@ retrieval:
   mode: "hybrid"
   top_k: 8
   candidate_k: 50
+  max_concurrent_queries: 1
   high_precision: true
   reranker: "bge_cross_encoder"
   reranker_model_name: "BAAI/bge-reranker-v2-m3"
