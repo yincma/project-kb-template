@@ -1,0 +1,268 @@
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import fnmatch
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import sys
+import time
+from typing import Any
+
+from rich.console import Console
+from tqdm import tqdm
+
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from kb.chunking import chunk_parsed_document
+from kb.embeddings import BGEEmbedder
+from kb.parsers import parse_file
+from kb.store import STORE_SCHEMA_VERSION, LanceDBStore, load_config, load_manifest, save_manifest, utc_now_iso
+
+
+DEFAULT_EXCLUDED_DIR_NAMES = {".git", ".venv", "node_modules", "dist", "build", "__pycache__", ".lancedb", ".codex"}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Index project documents into local LanceDB.")
+    parser.add_argument("--config", default=None, help="Path to kb/config.yaml")
+    parser.add_argument("--rebuild", action="store_true", help="Delete and rebuild the local index")
+    args = parser.parse_args()
+
+    console = Console()
+    index_project(args.config, rebuild=args.rebuild, console=console)
+
+
+def index_project(config_path: str | Path | None = None, *, rebuild: bool = False, console: Console | None = None) -> dict[str, Any]:
+    console = console or Console()
+    started = time.perf_counter()
+    cfg = load_config(config_path)
+    store = LanceDBStore(cfg)
+
+    if rebuild:
+        if cfg.db_path.exists():
+            shutil.rmtree(cfg.db_path)
+        store = LanceDBStore(cfg)
+
+    if store.table_exists() and store.detect_schema_version() < STORE_SCHEMA_VERSION:
+        raise RuntimeError(
+            "Existing LanceDB table uses the v1 schema. Run "
+            "`uv run python kb/ingest.py --config kb/config.yaml --rebuild` "
+            "to rebuild the local index with the v2 schema."
+        )
+
+    manifest = {"version": STORE_SCHEMA_VERSION, "files": {}} if rebuild else load_manifest(cfg)
+    if int(manifest.get("version", 1)) < STORE_SCHEMA_VERSION and manifest.get("files"):
+        raise RuntimeError(
+            "Existing manifest uses the v1 schema. Run "
+            "`uv run python kb/ingest.py --config kb/config.yaml --rebuild` "
+            "to rebuild the local index with the v2 manifest."
+        )
+    manifest["version"] = STORE_SCHEMA_VERSION
+    store.open_or_create_table()
+    files = discover_files(cfg)
+
+    indexed_files = 0
+    skipped_files = 0
+    warning_count = 0
+    chunk_count = 0
+    embedder = None
+
+    if not files:
+        console.print("[yellow]No source files found. Add documents under docs/ or update kb/config.yaml.[/yellow]")
+
+    for path in tqdm(files, desc="Indexing", unit="file"):
+        rel_path = path.relative_to(cfg.root_path).as_posix()
+        sha256 = file_sha256(path)
+        modified_time = path.stat().st_mtime
+        previous = manifest.get("files", {}).get(rel_path)
+        if previous and previous.get("sha256") == sha256:
+            skipped_files += 1
+            continue
+
+        parsed = parse_file(path, config=cfg)
+        if parsed is None or not parsed.text.strip():
+            skipped_files += 1
+            warning_count += len(parsed.warnings if parsed else [])
+            for warning in parsed.warnings if parsed else []:
+                console.print(f"[yellow]{warning}[/yellow]")
+            continue
+
+        for warning in parsed.warnings:
+            warning_count += 1
+            console.print(f"[yellow]{warning}[/yellow]")
+
+        chunks = chunk_parsed_document(
+            parsed,
+            file_ext=path.suffix.lower(),
+            chunk_size=cfg.chunking.chunk_size,
+            chunk_overlap=cfg.chunking.chunk_overlap,
+        )
+        if not chunks:
+            skipped_files += 1
+            continue
+
+        store.delete_sources([rel_path])
+        if embedder is None:
+            embedder = build_embedder(cfg)
+        vectors = embedder.embed_texts([chunk.text for chunk in chunks])
+        indexed_at = utc_now_iso()
+        rows = [
+            row_for_chunk(
+                chunk=chunk,
+                vector=vector,
+                source_path=rel_path,
+                file_path=path,
+                sha256=sha256,
+                modified_time=modified_time,
+                indexed_at=indexed_at,
+            )
+            for chunk, vector in zip(chunks, vectors)
+        ]
+        store.add_rows(rows)
+
+        manifest.setdefault("files", {})[rel_path] = {
+            "sha256": sha256,
+            "modified_time": modified_time,
+            "chunk_count": len(rows),
+            "indexed_at": indexed_at,
+        }
+        indexed_files += 1
+        chunk_count += len(rows)
+
+    fts_warning = store.ensure_fts_index()
+    if fts_warning:
+        warning_count += 1
+        console.print(f"[yellow]{fts_warning}[/yellow]")
+    save_manifest(cfg, manifest)
+
+    elapsed = time.perf_counter() - started
+    console.print(
+        f"[green]Done.[/green] indexed_files={indexed_files} chunks={chunk_count} "
+        f"skipped_files={skipped_files} warnings={warning_count} elapsed={elapsed:.1f}s"
+    )
+    return {
+        "indexed_files": indexed_files,
+        "chunks": chunk_count,
+        "skipped_files": skipped_files,
+        "warnings": warning_count,
+        "elapsed": elapsed,
+    }
+
+
+def build_embedder(cfg):
+    return BGEEmbedder(
+        cfg.embedding.model_name,
+        batch_size=cfg.embedding.batch_size,
+        device=cfg.embedding.device,
+        use_fp16=cfg.embedding.use_fp16,
+    )
+
+
+def discover_files(cfg) -> list[Path]:
+    files: list[Path] = []
+    for source_dir in cfg.scan.source_dirs:
+        root = (cfg.root_path / source_dir).resolve()
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if should_include(path, cfg.root_path, cfg.scan.include_patterns, cfg.scan.exclude_patterns):
+                files.append(path)
+    return sorted(files)
+
+
+def should_include(path: Path, project_root: Path, include_patterns: list[str], exclude_patterns: list[str]) -> bool:
+    rel = path.relative_to(project_root).as_posix()
+    if any(part in DEFAULT_EXCLUDED_DIR_NAMES for part in path.relative_to(project_root).parts):
+        return False
+    if any(fnmatch.fnmatch(rel, pattern) for pattern in exclude_patterns):
+        return False
+    return any(fnmatch.fnmatch(rel, pattern) for pattern in include_patterns)
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for block in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def row_for_chunk(
+    *,
+    chunk,
+    vector: list[float],
+    source_path: str,
+    file_path: Path,
+    sha256: str,
+    modified_time: float,
+    indexed_at: str,
+) -> dict[str, Any]:
+    metadata = {
+        "source_path": source_path,
+        "file_name": file_path.name,
+        "file_ext": file_path.suffix.lower(),
+        "heading": chunk.heading,
+        "chunk_id": chunk_id(source_path, sha256, chunk.chunk_index),
+        "chunk_index": chunk.chunk_index,
+        "start_char": chunk.start_char,
+        "end_char": chunk.end_char,
+        "parser_name": _metadata_value(chunk, "parser_name", "text"),
+        "source_format": _metadata_value(chunk, "source_format", file_path.suffix.lower()),
+        "page_number": _metadata_value(chunk, "page_number"),
+        "slide_number": _metadata_value(chunk, "slide_number"),
+        "sheet_name": _metadata_value(chunk, "sheet_name"),
+        "row_range": _metadata_value(chunk, "row_range"),
+        "cell_range": _metadata_value(chunk, "cell_range"),
+        "ocr_used": bool(_metadata_value(chunk, "ocr_used", False)),
+        "ocr_confidence": _metadata_value(chunk, "ocr_confidence"),
+        "extraction_method": _metadata_value(chunk, "extraction_method", "text"),
+        "asset_type": _metadata_value(chunk, "asset_type", "document"),
+        "section_index": _metadata_value(chunk, "section_index"),
+        "sha256": sha256,
+        "modified_time": modified_time,
+        "indexed_at": indexed_at,
+    }
+    return {
+        "id": metadata["chunk_id"],
+        "text": chunk.text,
+        "vector": vector,
+        "source_path": source_path,
+        "file_name": file_path.name,
+        "heading": chunk.heading or "",
+        "chunk_index": chunk.chunk_index,
+        "parser_name": metadata["parser_name"] or "",
+        "source_format": metadata["source_format"] or file_path.suffix.lower(),
+        "page_number": metadata["page_number"],
+        "slide_number": metadata["slide_number"],
+        "sheet_name": metadata["sheet_name"] or "",
+        "row_range": metadata["row_range"] or "",
+        "cell_range": metadata["cell_range"] or "",
+        "ocr_used": bool(metadata["ocr_used"]),
+        "ocr_confidence": metadata["ocr_confidence"],
+        "extraction_method": metadata["extraction_method"] or "",
+        "asset_type": metadata["asset_type"] or "",
+        "sha256": sha256,
+        "modified_time": modified_time,
+        "indexed_at": indexed_at,
+        "metadata_json": json.dumps(metadata, ensure_ascii=False),
+    }
+
+
+def chunk_id(source_path: str, sha256: str, chunk_index: int) -> str:
+    raw = f"{source_path}:{sha256}:{chunk_index}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _metadata_value(chunk, key: str, default=None):
+    metadata = getattr(chunk, "metadata", None) or {}
+    return metadata.get(key, default)
+
+
+if __name__ == "__main__":
+    main()

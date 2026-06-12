@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "project-kb": {
+      "command": "uv",
+      "args": ["run", "python", "kb/mcp_server.py"],
+      "env": {
+        "KB_CONFIG": "kb/config.yaml",
+        "KB_DB_PATH": ".lancedb",
+        "KB_READ_ONLY": "true"
+      },
+      "disabled": false,
+      "disabledTools": []
+    }
+  }
+}
+

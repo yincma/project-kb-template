@@ -1,0 +1,89 @@
+project_root: "."
+path_base: "config_dir"
+
+database:
+  db_path: ".lancedb"
+  table_name: "project_kb"
+  manifest_path: ".lancedb/manifest.json"
+  vector_dimension: 1024
+
+scan:
+  source_dirs:
+    - docs
+  include_patterns:
+    - "**/*"
+  exclude_patterns:
+    - ".git/**"
+    - ".venv/**"
+    - "node_modules/**"
+    - "dist/**"
+    - "build/**"
+    - "__pycache__/**"
+    - ".lancedb/**"
+    - ".codex/**"
+
+chunking:
+  chunk_size: 1000
+  chunk_overlap: 120
+
+embedding:
+  model_name: "BAAI/bge-m3"
+  batch_size: 16
+  device: null
+  use_fp16: null
+
+parsing:
+  ocr:
+    enabled: true
+    engine: "rapidocr"
+    min_text_chars_per_page: 30
+    max_pages_per_file: 300
+    image_dpi: 180
+    languages: ["ch", "en"]
+  office:
+    extract_images: true
+    extract_notes: true
+    max_sheet_rows: 20000
+
+retrieval:
+  mode: "hybrid"
+  top_k: 8
+  candidate_k: 50
+  high_precision: true
+  reranker: "bge_cross_encoder"
+  reranker_model_name: "BAAI/bge-reranker-v2-m3"
+  rerank_top_k: 40
+  fallback_reranker: "rrf"
+  boosts:
+    enabled: true
+    rules:
+      - name: "risk-register"
+        query_terms: ["risk", "风险", "严重", "severity", "owner"]
+        source_globs: ["*风险*.csv", "*risk*.csv", "*risk-register*", "*/风险/*"]
+        weight: 0.12
+      - name: "meeting-notes"
+        query_terms: ["会议", "纪要", "standup", "对账", "负责"]
+        source_globs: ["*会议纪要*", "*standup*", "*meeting*", "*/会议纪要/*"]
+        weight: 0.08
+      - name: "standup-reconciliation"
+        query_terms: ["对账", "reconciliation", "payment status", "支付状态"]
+        source_globs: ["*standup*", "*daily*"]
+        weight: 0.10
+      - name: "milestones"
+        query_terms: ["milestone", "里程碑", "关键里程碑", "计划", "日期"]
+        source_globs: ["*milestone*", "*里程碑*", "*/配置/milestones.*"]
+        weight: 0.12
+      - name: "code-api"
+        query_terms: ["api", "endpoint", "route", "接口", "returns"]
+        source_globs: ["*/代码/*", "*/code/*", "*.py", "*.ts", "*.tsx", "*.js"]
+        weight: 0.08
+      - name: "architecture"
+        query_terms: ["adr", "architecture", "架构", "schema", "table", "事件驱动"]
+        source_globs: ["*/架构/*", "*/architecture/*", "*.sql", "*architecture*"]
+        weight: 0.08
+      - name: "requirements"
+        query_terms: ["scope", "需求", "范围", "mvp", "out of scope", "不属于"]
+        source_globs: ["*/需求/*", "*/requirements/*", "*scope*"]
+        weight: 0.06
+  max_snippet_chars: 500
+  max_return_chars: 12000

@@ -1,0 +1,14 @@
+[mcp_servers."project-kb"]
+command = "uv"
+args = ["run", "python", "kb/mcp_server.py"]
+cwd = "."
+enabled = true
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+enabled_tools = ["kb_status", "search_project_kb", "read_kb_source"]
+
+[mcp_servers."project-kb".env]
+KB_CONFIG = "kb/config.yaml"
+KB_DB_PATH = ".lancedb"
+KB_READ_ONLY = "true"
+
