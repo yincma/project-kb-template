@@ -3,25 +3,18 @@ project_root: "."
 path_base: "config_dir"
 
 database:
-  db_path: ".lancedb"
-  table_name: "project_kb"
-  manifest_path: ".lancedb/manifest.json"
+  db_path: ".lancedb_raw"
+  table_name: "project_kb_raw"
+  manifest_path: ".lancedb_raw/manifest.json"
   vector_dimension: 1024
-  extracted_cache_dir: ".kb_cache/extracted"
+  extracted_cache_dir: ".kb_cache_raw/extracted"
 
 scan:
   source_dirs:
-    - docs
+    - sources
   include_patterns:
-    - "**/*.md"
-    - "**/*.csv"
-    - "**/*.yaml"
-    - "**/*.yml"
+    - "**/*"
   exclude_patterns:
-    - "docs/.obsidian/**"
-    - "docs/_attachments/**"
-    - "docs/_templates/**"
-    - "docs/99_Inbox/**"
     - ".git/**"
     - ".venv/**"
     - "node_modules/**"
@@ -29,7 +22,9 @@ scan:
     - "build/**"
     - "__pycache__/**"
     - ".lancedb/**"
+    - ".lancedb_raw/**"
     - ".kb_cache/**"
+    - ".kb_cache_raw/**"
     - ".codex/**"
 
 chunking:

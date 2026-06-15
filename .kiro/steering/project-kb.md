@@ -33,3 +33,23 @@ Call `read_kb_source` only when the returned snippet is not enough, and keep `ma
 Do not modify, delete, rebuild, or reindex the knowledge base through MCP. The MCP server intentionally exposes only read-only tools.
 
 Return only the minimum sensitive source text needed to answer the user's question.
+
+## Obsidian Curator Rules
+
+When organizing knowledge, client inputs, requirements, capabilities, case studies, delivery assets, commercial risks, or proposal blocks, first search the relevant Project KB source. Use CLI raw-index queries for `sources/` intake and the default MCP curated index for `docs/` knowledge unless the user says otherwise.
+
+When generating Obsidian notes, preserve structured `source_refs` with `source_path`, `heading`, `chunk_index`, and available `page_number`, `slide_number`, `sheet_name`, or `cell_range`.
+
+Do not write inferences as facts. Put unsupported content under `Assumptions` or `Evidence Gaps`.
+
+AI-generated Obsidian notes must default to `status: needs_review`.
+
+Do not overwrite files with `status: reviewed` unless the user explicitly asks.
+
+Prefer small, clear Markdown notes over long documents.
+
+Use Obsidian internal links such as `[[Client_A_Requirement_Matrix]]`.
+
+After each curation pass, report proposed file paths, a short content summary, and questions requiring human confirmation.
+
+Do not use MCP tools to modify, delete, rebuild, or reindex the knowledge base.
