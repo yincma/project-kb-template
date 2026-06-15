@@ -2,10 +2,10 @@
 
 This template creates a local, read-only Project KB with two layers:
 
-- `sources/`: raw materials. Never rewrite or delete original source files.
-- `docs/`: curated Markdown knowledge base. This is also the Obsidian Vault and the default MCP-indexed source of truth.
+- `sources/`: original evidence archive. Never rewrite or delete original source files.
+- `docs/`: curated knowledge source for day-to-day human and AI work. This is also the Obsidian Vault and the default MCP-indexed layer.
 
-LanceDB indexes are rebuildable caches. They are not the source of truth.
+Use `sources/` to verify evidence and `docs/` for reviewed operating knowledge. LanceDB indexes are rebuildable caches.
 
 ## Prerequisites
 

@@ -13,7 +13,26 @@ scan:
   source_dirs:
     - sources
   include_patterns:
-    - "**/*"
+    - "sources/*.pdf"
+    - "sources/**/*.pdf"
+    - "sources/*.docx"
+    - "sources/**/*.docx"
+    - "sources/*.pptx"
+    - "sources/**/*.pptx"
+    - "sources/*.xlsx"
+    - "sources/**/*.xlsx"
+    - "sources/*.md"
+    - "sources/**/*.md"
+    - "sources/*.txt"
+    - "sources/**/*.txt"
+    - "sources/*.csv"
+    - "sources/**/*.csv"
+    - "sources/*.json"
+    - "sources/**/*.json"
+    - "sources/*.yaml"
+    - "sources/**/*.yaml"
+    - "sources/*.yml"
+    - "sources/**/*.yml"
   exclude_patterns:
     - ".git/**"
     - ".venv/**"

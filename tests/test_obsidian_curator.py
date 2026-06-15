@@ -28,6 +28,7 @@ DOC_DIRS = [
     "docs/70_Commercial_Risk",
     "docs/90_Proposal_Blocks",
     "docs/99_Inbox",
+    "docs/_attachments",
     "docs/_templates",
 ]
 
@@ -83,6 +84,9 @@ def test_raw_config_targets_sources_and_raw_cache():
     assert cfg.database.manifest_path == ".lancedb_raw/manifest.json"
     assert cfg.database.extracted_cache_dir == ".kb_cache_raw/extracted"
     assert cfg.scan.source_dirs == ["sources"]
+    assert "sources/**/*.pdf" in cfg.scan.include_patterns
+    assert "sources/**/*.yml" in cfg.scan.include_patterns
+    assert "**/*" not in cfg.scan.include_patterns
     assert cfg.db_path == ROOT / ".lancedb_raw"
     assert cfg.extracted_cache_dir == ROOT / ".kb_cache_raw" / "extracted"
 
