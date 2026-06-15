@@ -200,5 +200,9 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-if __name__ == "__main__":
+def main() -> None:
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

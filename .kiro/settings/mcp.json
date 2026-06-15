@@ -2,7 +2,7 @@
   "mcpServers": {
     "project-kb": {
       "command": "uv",
-      "args": ["run", "python", "kb/mcp_server.py"],
+      "args": ["run", "python", "-m", "kb.mcp_server"],
       "env": {
         "KB_CONFIG": "kb/config.yaml",
         "KB_DB_PATH": ".lancedb",

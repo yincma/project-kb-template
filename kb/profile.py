@@ -87,7 +87,7 @@ def set_profile(profile: str, config_path: Path) -> None:
     if before.database.vector_dimension != after.database.vector_dimension and before.db_path.exists():
         console.print(
             "[yellow]Vector dimension changed. Run "
-            "`uv run python kb/ingest.py --config kb/config.yaml --rebuild` before querying.[/yellow]"
+            "`uv run project-kb-ingest --config kb/config.yaml --rebuild` before querying.[/yellow]"
         )
 
 

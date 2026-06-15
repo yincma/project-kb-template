@@ -20,6 +20,12 @@ DEFAULT_EXCLUDES = [
     ".lancedb/**",
     ".kb_cache/**",
     ".codex/**",
+    "**/.gitkeep",
+    "**/.keep",
+    "**/.placeholder",
+    "**/.DS_Store",
+    "**/Thumbs.db",
+    "**/desktop.ini",
 ]
 
 STORE_SCHEMA_VERSION = 2
@@ -75,6 +81,7 @@ class OfficeParsingConfig(BaseModel):
     extract_images: bool = False
     extract_notes: bool = True
     max_sheet_rows: int = 20000
+    xlsx_rows_per_section: int = 500
 
 
 class ParsingConfig(BaseModel):
@@ -332,7 +339,7 @@ class LanceDBStore:
         if not self.table_exists():
             raise RuntimeError(
                 f"LanceDB table `{self.config.database.table_name}` does not exist. "
-                "Run `uv run python kb/ingest.py --config kb/config.yaml` first."
+                "Run `uv run project-kb-ingest --config kb/config.yaml` first."
             )
         return self.connect().open_table(self.config.database.table_name)
 

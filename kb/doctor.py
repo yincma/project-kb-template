@@ -39,12 +39,20 @@ def doctor_project(config_path: str | Path = "kb/config.yaml") -> dict[str, Any]
     if cfg.retrieval.max_concurrent_queries != 1:
         warnings.append("max_concurrent_queries is not 1; set it to 1 to reduce local machine stalls.")
 
+    fts_index = _index_report(store, "fts")
+    vector_index = _index_report(store, "vector")
+    vector_search_available = _vector_search_available(store)
+
     return {
         **diagnose,
         "profile": cfg.profile,
         "config_exists": Path(config_path).exists(),
-        "fts_index": _index_status(store, "fts"),
-        "vector_index": _index_status(store, "vector"),
+        "fts_index": fts_index["status"],
+        "fts_index_detail": fts_index["detail"],
+        "vector_index": vector_index["status"],
+        "vector_index_detail": vector_index["detail"],
+        "vector_search_available": vector_search_available,
+        "manual_vector_index_required": False,
         "mcp_config": {
             "codex": (cfg.root_path / ".codex" / "config.toml").exists(),
             "kiro": (cfg.root_path / ".kiro" / "settings" / "mcp.json").exists(),
@@ -73,8 +81,11 @@ def print_doctor(payload: dict[str, Any]) -> None:
         "row_count",
         "fts_index",
         "vector_index",
+        "vector_search_available",
+        "manual_vector_index_required",
     ):
         table.add_row(key, str(payload.get(key)))
+    table.add_row("vector_index_detail", str(payload.get("vector_index_detail")))
     mcp = payload["mcp_config"]
     table.add_row("mcp_config", f"codex={mcp['codex']} kiro={mcp['kiro']} agents={mcp['agents']}")
     models = payload["models"]
@@ -84,20 +95,37 @@ def print_doctor(payload: dict[str, Any]) -> None:
         console.print(f"[yellow]{warning}[/yellow]")
 
 
-def _index_status(store: LanceDBStore, kind: str) -> str:
+def _index_report(store: LanceDBStore, kind: str) -> dict[str, str]:
     if not store.config.db_path.exists():
-        return "missing table"
+        return {"status": "missing_table", "detail": "LanceDB directory does not exist yet."}
     if not store.table_exists():
-        return "missing table"
+        return {"status": "missing_table", "detail": "LanceDB table does not exist yet."}
     try:
         table = store.open_table()
         if hasattr(table, "list_indices"):
             indices = table.list_indices()
             rendered = " ".join(str(index).lower() for index in indices)
-            return "present" if kind in rendered else "unknown"
-    except Exception:
-        pass
-    return "unknown"
+            if kind in rendered:
+                return {"status": "present", "detail": f"LanceDB reports a {kind} index."}
+            return {
+                "status": "not_reported_by_lancedb",
+                "detail": f"LanceDB did not report a {kind} index through list_indices().",
+            }
+    except Exception as exc:
+        return {
+            "status": "not_reported_by_lancedb",
+            "detail": f"LanceDB index metadata is unavailable: {exc}",
+        }
+    return {
+        "status": "not_reported_by_lancedb",
+        "detail": "This LanceDB table object does not expose list_indices().",
+    }
+
+
+def _vector_search_available(store: LanceDBStore) -> bool:
+    if not store.config.db_path.exists() or not store.table_exists():
+        return False
+    return "vector" in store.schema_field_names()
 
 
 if __name__ == "__main__":

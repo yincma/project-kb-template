@@ -43,6 +43,15 @@ DEFAULT_EXCLUDED_DIR_NAMES = {
     ".codex",
 }
 
+DEFAULT_IGNORED_FILE_NAMES = {
+    ".gitkeep",
+    ".keep",
+    ".placeholder",
+    ".DS_Store",
+    "Thumbs.db",
+    "desktop.ini",
+}
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Index project documents into local LanceDB.")
@@ -75,7 +84,7 @@ def index_project(
     if store.table_exists() and store.detect_schema_version() < STORE_SCHEMA_VERSION:
         raise RuntimeError(
             "Existing LanceDB table uses the v1 schema. Run "
-            "`uv run python kb/ingest.py --config kb/config.yaml --rebuild` "
+            "`uv run project-kb-ingest --config kb/config.yaml --rebuild` "
             "to rebuild the local index with the v2 schema."
         )
 
@@ -83,7 +92,7 @@ def index_project(
     if int(manifest.get("version", 1)) < STORE_SCHEMA_VERSION and manifest.get("files"):
         raise RuntimeError(
             "Existing manifest uses the v1 schema. Run "
-            "`uv run python kb/ingest.py --config kb/config.yaml --rebuild` "
+            "`uv run project-kb-ingest --config kb/config.yaml --rebuild` "
             "to rebuild the local index with the v2 manifest."
         )
     manifest["version"] = STORE_SCHEMA_VERSION
@@ -99,8 +108,10 @@ def index_project(
     if not files:
         console.print("[yellow]No source files found. Add documents under docs/ or update kb/config.yaml.[/yellow]")
 
-    for path in tqdm(files, desc="Indexing", unit="file"):
+    total_files = len(files)
+    for file_index, path in enumerate(tqdm(files, desc="Indexing files", unit="file"), start=1):
         rel_path = path.relative_to(cfg.root_path).as_posix()
+        console.print(f"[cyan]Indexing file {file_index}/{total_files}:[/cyan] {rel_path}")
         sha256 = file_sha256(path)
         modified_time = path.stat().st_mtime
         previous = manifest.get("files", {}).get(rel_path)
@@ -132,10 +143,9 @@ def index_project(
             skipped_files += 1
             continue
 
-        store.delete_sources([rel_path])
         if embedder is None:
             embedder = build_embedder(cfg)
-        vectors = embedder.embed_texts([chunk.text for chunk in chunks])
+        vectors = embed_chunks(embedder, chunks, rel_path=rel_path)
         indexed_at = utc_now_iso()
         rows = [
             row_for_chunk(
@@ -149,6 +159,7 @@ def index_project(
             )
             for chunk, vector in zip(chunks, vectors)
         ]
+        store.delete_sources([rel_path])
         store.add_rows(rows)
 
         manifest.setdefault("files", {})[rel_path] = {
@@ -190,6 +201,18 @@ def build_embedder(cfg):
     )
 
 
+def embed_chunks(embedder, chunks, *, rel_path: str) -> list[list[float]]:
+    batch_size = max(1, int(getattr(embedder, "batch_size", len(chunks)) or len(chunks)))
+    vectors: list[list[float]] = []
+    with tqdm(total=len(chunks), desc=f"Embedding {Path(rel_path).name}", unit="chunk", leave=False) as progress:
+        for start in range(0, len(chunks), batch_size):
+            batch = chunks[start : start + batch_size]
+            vectors.extend(embedder.embed_texts([chunk.text for chunk in batch]))
+            progress.update(len(batch))
+            progress.set_postfix_str(f"{min(start + len(batch), len(chunks))}/{len(chunks)}")
+    return vectors
+
+
 def discover_files(cfg) -> list[Path]:
     files: list[Path] = []
     for source_dir in cfg.scan.source_dirs:
@@ -206,6 +229,8 @@ def discover_files(cfg) -> list[Path]:
 
 def should_include(path: Path, project_root: Path, include_patterns: list[str], exclude_patterns: list[str]) -> bool:
     rel = path.relative_to(project_root).as_posix()
+    if path.name in DEFAULT_IGNORED_FILE_NAMES:
+        return False
     if any(part in DEFAULT_EXCLUDED_DIR_NAMES for part in path.relative_to(project_root).parts):
         return False
     if any(fnmatch.fnmatch(rel, pattern) for pattern in exclude_patterns):
