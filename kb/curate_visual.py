@@ -23,7 +23,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Export raw visual evidence as Obsidian visual summary notes.")
     parser.add_argument("--config", default="kb/config.raw.yaml", help="Raw KB config path")
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--review-status", choices=["needs_review", "reviewed"], default="needs_review")
+    parser.add_argument("--review-status", choices=["needs_review", "reviewed", "approved"], default="needs_review")
     parser.add_argument("--source-filter", default=None)
     parser.add_argument("--visual-type", default=None)
     parser.add_argument("--limit", type=int, default=None)
@@ -104,8 +104,6 @@ def curate_visual_summaries(
         has_caption_or_ocr = bool(str(caption.get("caption") or "").strip() or str(caption.get("ocr_text") or "").strip())
         if only_searchable and not caption_searchable:
             skipped_not_searchable += 1
-            if not has_caption_or_ocr:
-                skipped_no_caption_or_ocr += 1
             continue
         occurrence = occurrences.get(str(caption.get("occurrence_id")))
         asset = assets.get(str(caption.get("asset_id")))

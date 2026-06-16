@@ -13,7 +13,7 @@ import yaml
 from kb.curate_visual import curate_visual_summaries
 from kb.ingest import index_project
 from kb.mcp_server import _find_result_row, clear_runtime_cache, read_kb_result
-from kb.multimodal.assets import caption_cache_key, ocr_cache_key, stable_occurrence_id
+from kb.multimodal.assets import CaptionResult, VisualAsset, VisualOccurrence, caption_cache_key, ocr_cache_key, stable_occurrence_id
 import kb.multimodal.captioning as captioning
 from kb.multimodal.manifest import MultimodalManifest
 from kb.multimodal.extraction import should_render_pdf_page
@@ -166,6 +166,43 @@ def test_curate_visual_only_searchable_and_no_only_searchable_modes(tmp_path: Pa
     assert second_export["skipped_existing"] == 1
     assert overwrite_export["exported"] == 1
     assert "searchable: false" in notes[0].read_text(encoding="utf-8")
+
+
+def test_curate_visual_skips_non_searchable_even_with_caption_by_default(tmp_path: Path):
+    config_path = _write_config(tmp_path, raw=True, provider="stub")
+    _seed_visual_caption(config_path, caption="Manual audit caption", searchable=False)
+
+    default_export = curate_visual_summaries(config_path=config_path)
+    audit_export = curate_visual_summaries(config_path=config_path, only_searchable=False)
+    notes = list((tmp_path / "docs" / "_generated" / "visual_summaries" / "needs_review").glob("*.md"))
+
+    assert default_export["exported"] == 0
+    assert default_export["skipped_not_searchable"] == 1
+    assert audit_export["exported"] == 1
+    assert len(notes) == 1
+    note_text = notes[0].read_text(encoding="utf-8")
+    assert "Manual audit caption" in note_text
+    assert "searchable: false" in note_text
+
+
+def test_curate_visual_review_status_approved_enters_curated_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    raw_config = _write_config(tmp_path, raw=True, provider="stub")
+    curated_config = _write_config(tmp_path, raw=False)
+    _seed_visual_caption(raw_config, caption="Approved AWS VPC architecture visual evidence", searchable=True)
+    monkeypatch.setattr("kb.ingest.build_embedder", lambda cfg: FakeEmbedder())
+
+    export_result = curate_visual_summaries(config_path=raw_config, review_status="approved")
+    notes = list((tmp_path / "docs" / "_generated" / "visual_summaries" / "needs_review").glob("*.md"))
+    curated_result = index_project(curated_config, rebuild=True)
+    cfg = load_config(curated_config)
+    payload = ProjectRetriever(config=cfg, store=LanceDBStore(cfg), embedder=FakeEmbedder()).search("AWS VPC", top_k=1)
+
+    assert export_result["exported"] == 1
+    assert "review_status: approved" in notes[0].read_text(encoding="utf-8")
+    assert "status: approved" in notes[0].read_text(encoding="utf-8")
+    assert curated_result["chunks"] >= 1
+    assert payload["results"][0]["asset_type"] == "visual"
+    assert "AWS VPC" in payload["results"][0]["snippet"]
 
 
 def test_visual_summary_frontmatter_becomes_visual_metadata(tmp_path: Path):
@@ -529,6 +566,7 @@ def test_openai_compatible_fenced_json_and_plain_text_fallback(tmp_path: Path, m
     second_parsed = parse_file(second, config=cfg)
 
     assert first_parsed.sections[0].metadata["visual_type"] == "architecture_diagram"
+    assert first_parsed.sections[0].metadata["caption_model"] == "gpt-4.1-mini"
     assert "Fenced AWS diagram" in first_parsed.sections[0].text
     assert "Plain visual caption text" in second_parsed.sections[0].text
     assert "structured parse failed" in second_parsed.sections[0].text
@@ -772,6 +810,57 @@ def _caption_cache_rows(manifest: MultimodalManifest) -> list[dict]:
     for path in sorted(manifest.caption_cache_dir.glob("*.json")):
         rows.append(json.loads(path.read_text(encoding="utf-8")))
     return rows
+
+
+def _seed_visual_caption(config_path: Path, *, caption: str, searchable: bool) -> None:
+    cfg = load_config(config_path)
+    manifest = MultimodalManifest(cfg)
+    asset = VisualAsset(
+        asset_id="asset_seeded",
+        image_hash="seededhash",
+        attachment_path="docs/_attachments/kb_assets/seeded/diagram.png",
+        width=320,
+        height=220,
+        mime_type="image/png",
+        ext=".png",
+        generated_from="standalone_image",
+        source_hash="sourcehash",
+    )
+    occurrence = VisualOccurrence(
+        occurrence_id="occ_seeded",
+        source_path="sources/seeded.pdf",
+        page_number=2,
+        slide_number=None,
+        sheet_name=None,
+        bbox=None,
+        occurrence_index=1,
+        asset_id=asset.asset_id,
+        image_hash=asset.image_hash,
+        extraction_method="page_render",
+        context_title="Seeded Architecture",
+        nearby_text="AWS VPC network boundary",
+    )
+    manifest.upsert_asset(asset)
+    manifest.upsert_occurrence(occurrence)
+    manifest.save_caption(
+        CaptionResult(
+            asset_id=asset.asset_id,
+            occurrence_id=occurrence.occurrence_id,
+            image_hash=asset.image_hash,
+            caption=caption,
+            visual_type="architecture_diagram",
+            entities=["AWS", "VPC"],
+            relationships=["VPC -> RDS"],
+            architecture_notes=["Seeded architecture evidence"],
+            text_for_embedding=caption if searchable else "",
+            caption_provider="test",
+            caption_model="test-model",
+            prompt_version="vision-caption-v1",
+            searchable=searchable,
+            confidence=0.8,
+            caption_cache_key=f"seeded_{'searchable' if searchable else 'not_searchable'}",
+        )
+    )
 
 
 def _png_bytes(text: str) -> bytes:

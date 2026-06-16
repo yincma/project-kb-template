@@ -65,10 +65,11 @@ def caption_visual_asset(
     cached_provider = provider
     if provider in {"openai_compatible", "azure", "gemini", "cloud_vision"} and not vision.allow_external_vision:
         cached_provider = "external_blocked"
+    caption_model = _resolved_caption_model(provider, vision)
     cap_key = caption_cache_key(
         image_hash=asset.image_hash,
         caption_provider=cached_provider,
-        caption_model=vision.model,
+        caption_model=caption_model,
         prompt_version=prompt_version,
         ocr_cache_key_value=ocr_key,
         ocr_text=ocr_text,
@@ -81,7 +82,6 @@ def caption_visual_asset(
     provider_payload: dict[str, Any] = {}
     caption_text = ""
     caption_confidence: float | None = None
-    caption_model = vision.model
     caption_provider = provider
 
     if provider in {"openai_compatible", "azure", "gemini", "cloud_vision"} and not vision.allow_external_vision:
@@ -91,6 +91,7 @@ def caption_visual_asset(
         caption_text = str(provider_payload.get("caption") or "")
         caption_confidence = provider_payload.get("confidence")
         caption_provider = str(provider_payload.get("caption_provider") or caption_provider)
+        caption_model = str(provider_payload.get("caption_model") or caption_model or "")
     elif provider in {"local", "local_vision"} and vision.enabled:
         caption_text = _local_context_caption(asset, occurrence)
         caption_confidence = 0.35 if caption_text else None
@@ -158,21 +159,23 @@ def caption_visual_asset(
 
 def _caption_with_openai_compatible(*, image_path: Path, vision, occurrence: VisualOccurrence) -> dict[str, Any]:
     api_key_env = getattr(vision, "api_key_env", "OPENAI_API_KEY") or "OPENAI_API_KEY"
+    model = _openai_compatible_model(vision)
     api_key = os.environ.get(api_key_env)
     if not api_key:
         return {
             "caption": "",
             "caption_provider": "openai_compatible_auth_error",
+            "caption_model": model,
             "uncertain_items": [f"Missing API key env var: {api_key_env}"],
         }
 
-    model = getattr(vision, "model", None) or "gpt-4.1-mini"
     base_url = (getattr(vision, "base_url", None) or "https://api.openai.com/v1").rstrip("/")
     upload = _prepare_upload_image(image_path, vision)
     if upload.get("skipped"):
         return {
             "caption": "",
             "caption_provider": "openai_compatible_skipped",
+            "caption_model": model,
             "uncertain_items": [str(upload["reason"])],
         }
     payload = {
@@ -215,9 +218,22 @@ def _caption_with_openai_compatible(*, image_path: Path, vision, occurrence: Vis
         return {
             "caption": "",
             "caption_provider": response.get("caption_provider", "openai_compatible_error"),
+            "caption_model": model,
             "uncertain_items": [str(response["_error"])],
         }
-    return _parse_openai_compatible_response(response)
+    parsed = _parse_openai_compatible_response(response)
+    parsed["caption_model"] = model
+    return parsed
+
+
+def _resolved_caption_model(provider: str, vision) -> str | None:
+    if provider == "openai_compatible" and getattr(vision, "enabled", False):
+        return _openai_compatible_model(vision)
+    return getattr(vision, "model", None)
+
+
+def _openai_compatible_model(vision) -> str:
+    return str(getattr(vision, "model", None) or "gpt-4.1-mini")
 
 
 def _default_openai_transport(*, url: str, headers: dict[str, str], payload: dict[str, Any], timeout: int = 60) -> dict[str, Any]:

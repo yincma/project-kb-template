@@ -195,6 +195,9 @@ uv run project-kb-curate-visual --config kb/config.raw.yaml --dry-run
 
 # Audit mode: include non-searchable metadata notes; not recommended for curated search
 uv run project-kb-curate-visual --config kb/config.raw.yaml --no-only-searchable
+
+# Use approved only for evidence that has already been confirmed
+uv run project-kb-curate-visual --config kb/config.raw.yaml --review-status approved
 ```
 
 Visual assets are saved under:
