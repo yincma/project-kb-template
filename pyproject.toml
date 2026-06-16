@@ -30,6 +30,7 @@ project-kb-profile = "kb.profile:main"
 project-kb-diagnose = "kb.diagnose:main"
 project-kb-mcp = "kb.mcp_server:main"
 project-kb-curate-visual = "kb.curate_visual:main"
+project-kb-evaluate-visual = "kb.evaluate_visual:main"
 
 [project.optional-dependencies]
 ocr = [

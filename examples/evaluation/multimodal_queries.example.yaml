@@ -1,0 +1,35 @@
+queries:
+  - id: architecture_api_gateway
+    query: "API Gateway 架构图"
+    top_k: 5
+    expected:
+      source_path:
+        contains: "architecture.pdf"
+      attachment_path:
+        contains: "kb_assets"
+      page_number:
+        any_of: [3, 4]
+      terms:
+        all_of:
+          - "API Gateway"
+          - "VPC"
+        case_sensitive: false
+      visual_type:
+        any_of:
+          - architecture_diagram
+          - unknown
+    must_not_include_raw_unreviewed_evidence: true
+
+  - id: screenshot_login
+    query: "ログイン画面 スクリーンショット"
+    top_k: 5
+    expected:
+      terms:
+        any_of:
+          - "ログイン"
+          - "SSO"
+          - "認証"
+        case_sensitive: false
+      attachment_path:
+        contains: "kb_assets"
+    must_not_include_raw_unreviewed_evidence: true

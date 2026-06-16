@@ -37,6 +37,27 @@ def test_multimodal_cli_smoke_raw_to_curated_visual_search(tmp_path: Path, monke
     assert raw_manifest.load_assets()
     assert raw_manifest.load_occurrences()
 
+    raw_visual = _run_cli(
+        ["uv", "run", "project-kb-query", "AWS architecture OCRTERM", "--config", str(raw_config), "--visual-only", "--json"],
+        env=env,
+    )
+    raw_visual_payload = json.loads(raw_visual.stdout)
+    assert raw_visual_payload["visual_only"] is True
+    assert raw_visual_payload["results"]
+    assert all(result["asset_type"] == "visual" for result in raw_visual_payload["results"])
+    assert all(result["index_role"] == "raw" for result in raw_visual_payload["results"])
+    assert all(result["raw_evidence"] is True for result in raw_visual_payload["results"])
+    assert all(result["review_status"] == "unreviewed" for result in raw_visual_payload["results"])
+    assert raw_visual_payload["results"][0]["attachment_path"].startswith("docs/_attachments/kb_assets/")
+
+    raw_visual_table = _run_cli(
+        ["uv", "run", "project-kb-query", "AWS architecture OCRTERM", "--config", str(raw_config), "--visual-only"],
+        env=env,
+    )
+    assert "raw_evidence=true" in raw_visual_table.stdout
+    assert "attachment=" in raw_visual_table.stdout
+    assert "![[docs/_attachments/kb_assets/" in raw_visual_table.stdout
+
     first_export = _run_cli(["uv", "run", "project-kb-curate-visual", "--config", str(raw_config)], env=env)
     second_export = _run_cli(["uv", "run", "project-kb-curate-visual", "--config", str(raw_config)], env=env)
     assert "exported=" in first_export.stdout
@@ -76,6 +97,52 @@ def test_multimodal_cli_smoke_raw_to_curated_visual_search(tmp_path: Path, monke
     assert "visual_type=" in query_table.stdout
     assert "attachment=" in query_table.stdout
 
+    query_yaml = tmp_path / "multimodal_queries.yaml"
+    query_yaml.write_text(
+        yaml.safe_dump(
+            {
+                "queries": [
+                    {
+                        "id": "architecture_smoke",
+                        "query": "AWS architecture OCRTERM",
+                        "top_k": 5,
+                        "expected": {
+                            "source_path": {"contains": "architecture.pdf"},
+                            "attachment_path": {"contains": "kb_assets"},
+                            "page_number": {"any_of": [1]},
+                            "terms": {"any_of": ["AWS", "architecture", "OCRTERM"], "case_sensitive": False},
+                        },
+                        "must_not_include_raw_unreviewed_evidence": True,
+                    }
+                ]
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    report_path = tmp_path / "visual_eval_report.json"
+    evaluation = _run_cli(
+        [
+            "uv",
+            "run",
+            "project-kb-evaluate-visual",
+            "--config",
+            str(curated_config),
+            "--queries",
+            str(query_yaml),
+            "--json",
+            "--output",
+            str(report_path),
+        ],
+        env=env,
+    )
+    evaluation_payload = json.loads(evaluation.stdout)
+    assert evaluation_payload["overall_pass"] is True
+    assert evaluation_payload["results"][0]["matched_rank"] is not None
+    assert report_path.exists()
+    assert "top_results_summary" in json.loads(report_path.read_text(encoding="utf-8"))["results"][0]
+
     monkeypatch.setenv("KB_CONFIG", str(curated_config))
     clear_runtime_cache()
     read_payload = read_kb_result(
@@ -91,8 +158,26 @@ def test_multimodal_cli_smoke_raw_to_curated_visual_search(tmp_path: Path, monke
     assert LanceDBStore(raw_cfg).count_rows() == raw_rows_before
 
 
-def _run_cli(args: list[str], *, env: dict[str, str]) -> subprocess.CompletedProcess:
-    return subprocess.run(args, cwd=ROOT, env=env, text=True, capture_output=True, check=True, timeout=120)
+def test_visual_only_missing_raw_index_gives_rebuild_hint(tmp_path: Path):
+    raw_config = _write_config(tmp_path, raw=True)
+    env = {
+        **os.environ,
+        "PROJECT_KB_TEST_FAKE_EMBEDDINGS": "1",
+        "PROJECT_KB_TEST_FAKE_EMBEDDING_DIM": "3",
+    }
+
+    result = _run_cli(
+        ["uv", "run", "project-kb-query", "diagram", "--config", str(raw_config), "--visual-only", "--json"],
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "project-kb-ingest --config kb/config.raw.yaml --rebuild" in result.stdout
+
+
+def _run_cli(args: list[str], *, env: dict[str, str], check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(args, cwd=ROOT, env=env, text=True, capture_output=True, check=check, timeout=120)
 
 
 def _write_config(tmp_path: Path, *, raw: bool) -> Path:

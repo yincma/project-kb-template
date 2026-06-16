@@ -157,6 +157,14 @@ source_refs:
 
 This template is multimodal-aware, but the first phase is not native image-vector search. Images, rendered PDF pages, and Office embedded images are converted into OCR/caption-backed Markdown or visual chunks, then searched through the existing text vector field.
 
+Recommended production mode:
+
+- Use local OCR / local / stub providers by default.
+- External vision must be explicitly enabled with `allow_external_vision: true`.
+- Raw index is an evidence pool for discovery and curation, not the official knowledge base.
+- Curated `docs/` Markdown is the formal human/AI knowledge base.
+- LanceDB tables are rebuildable caches, not source of truth.
+
 Default boundary:
 
 - Raw index uses `kb/config.raw.yaml` and can extract visual evidence from `sources/`.
@@ -172,6 +180,32 @@ uv run project-kb-query "architecture diagram AWS VPC" --config kb/config.raw.ya
 uv run project-kb-curate-visual --config kb/config.raw.yaml
 # review generated notes, then set review_status: reviewed or move them to a formal docs/ folder
 uv run project-kb-ingest --config kb/config.yaml --rebuild
+```
+
+### View Raw Visual Evidence
+
+Use explicit raw visual search when you need to find original diagrams, screenshots, scanned pages, or image evidence before curation:
+
+```bash
+uv run project-kb-query "API Gateway 架构图" --config kb/config.raw.yaml --visual-only
+uv run project-kb-query "API Gateway 架构图" --config kb/config.raw.yaml --visual-only --json
+```
+
+This does not change normal query behavior. Raw visual results are marked as:
+
+```text
+index_role=raw
+raw_evidence=true
+curated=false
+review_status=unreviewed
+```
+
+Each visual result includes `source_path`, `indexed_source_path`, `attachment_path`, page/slide metadata, visual type, confidence, searchable status, and an Obsidian wikilink. Open `attachment_path` in Obsidian or Finder to inspect the generated image.
+
+If the raw visual index does not exist yet, run:
+
+```bash
+uv run project-kb-ingest --config kb/config.raw.yaml --rebuild
 ```
 
 `project-kb-curate-visual` writes Obsidian notes to:
@@ -285,6 +319,12 @@ uv run project-kb-query "AWS VPC architecture diagram" --config kb/config.yaml -
 ```
 
 Visual results include the original `source_path`, `indexed_source_path`, and `attachment_path`. Open `attachment_path` in Obsidian or Finder to inspect the image. Use `read_kb_result` for visual search results; `read_kb_source` remains for older text-source workflows.
+
+For a full pilot checklist and manual QA process, see [`guides/runbooks/multimodal_pilot.md`](guides/runbooks/multimodal_pilot.md). Copy [`examples/evaluation/multimodal_queries.example.yaml`](examples/evaluation/multimodal_queries.example.yaml) and run:
+
+```bash
+uv run project-kb-evaluate-visual --config kb/config.yaml --queries kb/cache/evaluation/multimodal_queries.yaml
+```
 
 ## MCP Tools
 

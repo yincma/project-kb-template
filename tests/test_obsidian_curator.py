@@ -106,6 +106,8 @@ def test_curated_config_targets_docs_and_excludes_non_curated_paths(tmp_path: Pa
     data = yaml.safe_load((ROOT / "kb" / "config.yaml").read_text(encoding="utf-8"))
     scan = data["scan"]
 
+    assert (ROOT / "guides" / "runbooks" / "multimodal_pilot.md").is_file()
+    assert (ROOT / "examples" / "evaluation" / "multimodal_queries.example.yaml").is_file()
     assert scan["source_dirs"] == ["docs"]
     assert data["database"]["index_role"] == "curated"
     assert data["parsing"]["multimodal"]["enabled"] is False
@@ -127,6 +129,8 @@ def test_curated_config_targets_docs_and_excludes_non_curated_paths(tmp_path: Pa
     _write(tmp_path / "docs" / "_attachments" / "asset.md", "# Asset\n")
     _write(tmp_path / "docs" / "_generated" / "visual_summaries" / "needs_review" / "draft.md", "# Draft\n")
     _write(tmp_path / "docs" / "01_Maps" / "Knowledge_Vault.canvas", "{}\n")
+    _write(tmp_path / "guides" / "runbooks" / "multimodal_pilot.md", "# Multimodal Pilot Runbook\n")
+    _write(tmp_path / "examples" / "evaluation" / "multimodal_queries.example.yaml", "queries: []\n")
 
     cfg = ProjectKBConfig(project_root=str(tmp_path))
     cfg.scan.source_dirs = scan["source_dirs"]
