@@ -7,6 +7,7 @@ from threading import BoundedSemaphore
 from typing import Any
 import warnings
 
+from kb.obsidian import to_obsidian_wikilink
 from kb.store import ProjectKBConfig, _arrowish_to_rows
 
 
@@ -349,6 +350,7 @@ def format_result(row: dict[str, Any], query: str, max_snippet_chars: int, *, in
         "occurrence_id": occurrence_id or None,
         "visual_type": visual_type or None,
         "attachment_path": attachment_path or None,
+        "attachment_wikilink": to_obsidian_wikilink(str(attachment_path)) if asset_type == "visual" and attachment_path else None,
         "image_hash": image_hash or None,
         "caption_provider": caption_provider or None,
         "caption_model": caption_model or None,

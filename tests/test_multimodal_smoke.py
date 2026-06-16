@@ -49,6 +49,9 @@ def test_multimodal_cli_smoke_raw_to_curated_visual_search(tmp_path: Path, monke
     assert all(result["raw_evidence"] is True for result in raw_visual_payload["results"])
     assert all(result["review_status"] == "unreviewed" for result in raw_visual_payload["results"])
     assert raw_visual_payload["results"][0]["attachment_path"].startswith("docs/_attachments/kb_assets/")
+    assert raw_visual_payload["results"][0]["attachment_wikilink"].startswith("![[_attachments/kb_assets/")
+    assert raw_visual_payload["visual_candidate_k"] >= 100
+    assert raw_visual_payload["visual_retry_used"] in {True, False}
 
     raw_visual_table = _run_cli(
         ["uv", "run", "project-kb-query", "AWS architecture OCRTERM", "--config", str(raw_config), "--visual-only"],
@@ -56,7 +59,8 @@ def test_multimodal_cli_smoke_raw_to_curated_visual_search(tmp_path: Path, monke
     )
     assert "raw_evidence=true" in raw_visual_table.stdout
     assert "attachment=" in raw_visual_table.stdout
-    assert "![[docs/_attachments/kb_assets/" in raw_visual_table.stdout
+    assert "![[_attachments/kb_assets/" in raw_visual_table.stdout
+    assert "![[docs/_attachments/kb_assets/" not in raw_visual_table.stdout
 
     first_export = _run_cli(["uv", "run", "project-kb-curate-visual", "--config", str(raw_config)], env=env)
     second_export = _run_cli(["uv", "run", "project-kb-curate-visual", "--config", str(raw_config)], env=env)
@@ -91,6 +95,7 @@ def test_multimodal_cli_smoke_raw_to_curated_visual_search(tmp_path: Path, monke
     assert result["asset_type"] == "visual"
     assert "architecture" in result["snippet"].lower() or "OCRTERM" in result["snippet"]
     assert result["attachment_path"].startswith("docs/_attachments/kb_assets/")
+    assert result["attachment_wikilink"].startswith("![[_attachments/kb_assets/")
     assert result["indexed_source_path"]
     assert result["source_path"].startswith("sources/")
     assert result["page_number"] or result["attachment_path"]

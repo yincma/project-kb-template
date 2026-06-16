@@ -200,7 +200,9 @@ curated=false
 review_status=unreviewed
 ```
 
-Each visual result includes `source_path`, `indexed_source_path`, `attachment_path`, page/slide metadata, visual type, confidence, searchable status, and an Obsidian wikilink. Open `attachment_path` in Obsidian or Finder to inspect the generated image.
+Each visual result includes `source_path`, `indexed_source_path`, `attachment_path`, page/slide metadata, visual type, confidence, searchable status, and an Obsidian wikilink. `attachment_path` stays project-root relative, for example `docs/_attachments/kb_assets/rfp_ab12cd/rfp_ab12cd_p038_page_dpi180_9f8e7d.png`; the Obsidian wikilink is vault-relative, for example `![[_attachments/kb_assets/rfp_ab12cd/rfp_ab12cd_p038_page_dpi180_9f8e7d.png]]`.
+
+`--visual-only` automatically searches a larger candidate pool than normal queries. If no visual evidence is found, broaden the query terms or rebuild the raw index.
 
 If the raw visual index does not exist yet, run:
 
@@ -318,7 +320,7 @@ uv run project-kb-query "AWS VPC architecture diagram" --config kb/config.yaml
 uv run project-kb-query "AWS VPC architecture diagram" --config kb/config.yaml --json
 ```
 
-Visual results include the original `source_path`, `indexed_source_path`, and `attachment_path`. Open `attachment_path` in Obsidian or Finder to inspect the image. Use `read_kb_result` for visual search results; `read_kb_source` remains for older text-source workflows.
+Visual results include the original `source_path`, `indexed_source_path`, `attachment_path`, and vault-relative `attachment_wikilink`. Open `attachment_path` in Finder or use `attachment_wikilink` inside the `docs/` Obsidian Vault. Use `read_kb_result` for visual search results; `read_kb_source` remains for older text-source workflows.
 
 For a full pilot checklist and manual QA process, see [`guides/runbooks/multimodal_pilot.md`](guides/runbooks/multimodal_pilot.md). Copy [`examples/evaluation/multimodal_queries.example.yaml`](examples/evaluation/multimodal_queries.example.yaml) and run:
 

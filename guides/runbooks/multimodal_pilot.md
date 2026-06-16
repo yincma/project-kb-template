@@ -59,10 +59,11 @@ Check each result for:
 - `review_status=unreviewed`
 - `source_path`
 - `attachment_path`
+- `attachment_wikilink`
 - `page_number` or `slide_number`
 - OCR/caption snippet
 
-Open `attachment_path` in Obsidian or Finder to inspect the original generated image.
+Open `attachment_path` in Finder or use `attachment_wikilink` inside the `docs/` Obsidian Vault to inspect the original generated image. `--visual-only` automatically searches a larger visual candidate pool; if it still returns no visual results, rebuild the raw index or try broader terms.
 
 ## 4. Export Visual Summary Drafts
 
@@ -87,8 +88,10 @@ docs/_generated/visual_summaries/needs_review/
 Generated notes include Obsidian embeds such as:
 
 ```text
-![[docs/_attachments/kb_assets/.../image.png]]
+![[_attachments/kb_assets/.../image.png]]
 ```
+
+The frontmatter still keeps the full project-root-relative `attachment_path`, for example `docs/_attachments/kb_assets/rfp_ab12cd/rfp_ab12cd_p038_page_dpi180_9f8e7d.png`.
 
 ## 5. Review Visual Summaries
 

@@ -12,8 +12,12 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from kb.embeddings import BGEEmbedder
+from kb.obsidian import to_obsidian_wikilink
 from kb.retrieval import ProjectRetriever
 from kb.store import LanceDBStore, load_config
+
+
+VISUAL_EMPTY_WARNING = "No visual results found in candidate set. Try rebuilding raw index or using broader terms."
 
 
 def main() -> None:
@@ -41,7 +45,6 @@ def main() -> None:
         raise SystemExit(1)
 
     requested_top_k = int(args.top_k or cfg.retrieval.top_k)
-    search_top_k = max(requested_top_k, int(cfg.retrieval.candidate_k or requested_top_k)) if args.visual_only else args.top_k
     retriever = ProjectRetriever(
         config=cfg,
         store=store,
@@ -54,16 +57,23 @@ def main() -> None:
     )
 
     try:
-        payload = retriever.search(args.query, top_k=search_top_k, source_filter=args.source_filter)
+        if args.visual_only:
+            payload = _search_visual_only(
+                retriever,
+                args.query,
+                source_filter=args.source_filter,
+                requested_top_k=requested_top_k,
+                configured_candidate_k=cfg.retrieval.candidate_k,
+                index_role=cfg.database.index_role,
+            )
+        else:
+            payload = retriever.search(args.query, top_k=args.top_k, source_filter=args.source_filter)
     except Exception as exc:
         if args.json:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2))
             raise SystemExit(1) from exc
         console.print(f"[red]Query failed:[/red] {exc}")
         raise SystemExit(1) from exc
-
-    if args.visual_only:
-        payload = _visual_only_payload(payload, cfg.database.index_role, requested_top_k)
 
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -126,13 +136,76 @@ def _source_display(result: dict) -> str:
     if result.get("attachment_path"):
         attachment = str(result["attachment_path"])
         details.append(f"attachment={_middle_truncate(attachment)}")
-        details.append(f"wikilink=![[{attachment}]]")
+        details.append(f"wikilink={to_obsidian_wikilink(attachment)}")
     if result.get("indexed_source_path"):
         details.append(f"indexed={_middle_truncate(str(result['indexed_source_path']))}")
     return "\n".join(details)
 
 
-def _visual_only_payload(payload: dict, index_role: str, requested_top_k: int) -> dict:
+def _search_visual_only(
+    retriever: ProjectRetriever,
+    query: str,
+    *,
+    source_filter: str | None,
+    requested_top_k: int,
+    configured_candidate_k: int | None,
+    index_role: str,
+) -> dict:
+    visual_candidate_k = _visual_candidate_k(configured_candidate_k, requested_top_k)
+    payload = retriever.search(
+        query,
+        top_k=visual_candidate_k,
+        candidate_k=visual_candidate_k,
+        source_filter=source_filter,
+    )
+    payload = _visual_only_payload(
+        payload,
+        index_role,
+        requested_top_k,
+        visual_candidate_k=visual_candidate_k,
+        visual_retry_used=False,
+    )
+    if payload["results"]:
+        return payload
+
+    retry_candidate_k = _visual_retry_candidate_k(visual_candidate_k, requested_top_k)
+    retry_payload = retriever.search(
+        query,
+        top_k=retry_candidate_k,
+        candidate_k=retry_candidate_k,
+        source_filter=source_filter,
+    )
+    retry_payload = _visual_only_payload(
+        retry_payload,
+        index_role,
+        requested_top_k,
+        visual_candidate_k=retry_candidate_k,
+        visual_retry_used=True,
+    )
+    if not retry_payload["results"]:
+        warnings_list = list(retry_payload.get("warnings", []))
+        warnings_list.append(VISUAL_EMPTY_WARNING)
+        retry_payload["warnings"] = warnings_list
+    return retry_payload
+
+
+def _visual_candidate_k(configured_candidate_k: int | None, requested_top_k: int) -> int:
+    base_candidate_k = int(configured_candidate_k or requested_top_k)
+    return max(base_candidate_k * 5, requested_top_k * 20, 100)
+
+
+def _visual_retry_candidate_k(visual_candidate_k: int, requested_top_k: int) -> int:
+    return max(visual_candidate_k * 3, requested_top_k * 50, 300)
+
+
+def _visual_only_payload(
+    payload: dict,
+    index_role: str,
+    requested_top_k: int,
+    *,
+    visual_candidate_k: int,
+    visual_retry_used: bool,
+) -> dict:
     enriched = []
     for result in payload.get("results", []):
         if result.get("asset_type") != "visual":
@@ -142,6 +215,8 @@ def _visual_only_payload(payload: dict, index_role: str, requested_top_k: int) -
     payload["top_k"] = requested_top_k
     payload["results"] = enriched[:requested_top_k]
     payload["visual_only"] = True
+    payload["visual_candidate_k"] = visual_candidate_k
+    payload["visual_retry_used"] = visual_retry_used
     return payload
 
 
@@ -150,7 +225,7 @@ def _annotate_result_role(result: dict, index_role: str) -> dict:
     metadata = annotated.get("metadata") if isinstance(annotated.get("metadata"), dict) else {}
     annotated["index_role"] = index_role
     if annotated.get("asset_type") == "visual" and annotated.get("attachment_path"):
-        annotated["attachment_wikilink"] = f"![[{annotated['attachment_path']}]]"
+        annotated["attachment_wikilink"] = to_obsidian_wikilink(str(annotated["attachment_path"]))
     if index_role == "raw":
         annotated["raw_evidence"] = True
         annotated["curated"] = False
@@ -182,7 +257,7 @@ def _print_visual_details(console: Console, results: list[dict]) -> None:
             location = f" page={result['page_number']}"
         elif result.get("slide_number"):
             location = f" slide={result['slide_number']}"
-        wikilink = f"![[{attachment}]]" if attachment else ""
+        wikilink = to_obsidian_wikilink(str(attachment)) if attachment else ""
         console.print(
             f"[{index}] source={result.get('source_path') or ''}{location} "
             f"visual_type={result.get('visual_type') or 'unknown'} "

@@ -13,6 +13,7 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from kb.multimodal.manifest import MultimodalManifest
+from kb.obsidian import to_obsidian_wikilink
 from kb.store import load_config
 
 
@@ -206,10 +207,10 @@ def _render_note(
         "source_refs": [source_ref],
     }
     page_or_slide = _page_or_slide(occurrence)
-    vault_attachment = _vault_attachment_path(attachment_path)
+    attachment_wikilink = to_obsidian_wikilink(attachment_path)
     body = f"""# Visual Summary - {_title_fragment(occurrence)}
 
-![[{vault_attachment}]]
+{attachment_wikilink}
 
 ## Source
 
@@ -276,12 +277,6 @@ def _page_or_slide(occurrence: dict[str, Any]) -> str:
     if occurrence.get("slide_number"):
         return f"Slide: {occurrence['slide_number']}"
     return "Location: source"
-
-
-def _vault_attachment_path(path: str) -> str:
-    if path.startswith("docs/"):
-        return path[len("docs/") :]
-    return path
 
 
 def _bullets(values: list[str]) -> str:

@@ -165,7 +165,10 @@ def test_curate_visual_only_searchable_and_no_only_searchable_modes(tmp_path: Pa
     assert audit_export["exported"] == 1
     assert second_export["skipped_existing"] == 1
     assert overwrite_export["exported"] == 1
-    assert "searchable: false" in notes[0].read_text(encoding="utf-8")
+    note_text = notes[0].read_text(encoding="utf-8")
+    assert "searchable: false" in note_text
+    assert "![[_attachments/kb_assets/" in note_text
+    assert "![[docs/_attachments/kb_assets/" not in note_text
 
 
 def test_curate_visual_skips_non_searchable_even_with_caption_by_default(tmp_path: Path):
@@ -699,6 +702,8 @@ def test_query_source_display_includes_visual_provenance():
     assert "visual_type=architecture_diagram" in rendered
     assert "page=38" in rendered
     assert "attachment=" in rendered
+    assert "wikilink=![[_attachments/kb_assets/" in rendered
+    assert "![[docs/_attachments/kb_assets/" not in rendered
 
 
 def _config(tmp_path: Path, *, multimodal: bool, provider: str = "local", vision_enabled: bool = True) -> ProjectKBConfig:
