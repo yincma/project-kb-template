@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -73,6 +74,13 @@ def diagnose_project(config_path: str | Path | None = None, *, deep_reranker_che
         )
     if metadata_summary and metadata_summary["missing_columns"]:
         warnings.append(f"Expected schema columns are missing: {', '.join(metadata_summary['missing_columns'])}")
+    visual_filter_fields = _visual_filter_fields(store) if table_exists else {}
+    missing_visual_filter_fields = [field for field, present in visual_filter_fields.items() if not present]
+    if missing_visual_filter_fields:
+        warnings.append(
+            "Visual result filter fields are missing; rebuild is required for efficient read_kb_result lookups: "
+            + ", ".join(missing_visual_filter_fields)
+        )
     if cfg.parsing.ocr.enabled and not ocr_status["available"]:
         warnings.append("OCR is enabled but no local OCR dependency is importable.")
     if cfg.retrieval.high_precision and not reranker_status["available"]:
@@ -113,7 +121,23 @@ def diagnose_project(config_path: str | Path | None = None, *, deep_reranker_che
             "vision_provider": cfg.parsing.multimodal.vision.provider,
             "allow_external_vision": cfg.parsing.multimodal.vision.allow_external_vision,
             "external_vision_enabled": _external_vision_enabled(cfg),
+            "vision_upload_limits": {
+                "max_upload_pixels": cfg.parsing.multimodal.vision.max_upload_pixels,
+                "max_upload_bytes": cfg.parsing.multimodal.vision.max_upload_bytes,
+                "resize_long_edge": cfg.parsing.multimodal.vision.resize_long_edge,
+                "jpeg_quality": cfg.parsing.multimodal.vision.jpeg_quality,
+                "timeout": cfg.parsing.multimodal.vision.timeout,
+                "max_retries": cfg.parsing.multimodal.vision.max_retries,
+            },
+            "api_key_env": cfg.parsing.multimodal.vision.api_key_env,
+            "api_key_env_exists": bool(os.environ.get(cfg.parsing.multimodal.vision.api_key_env)),
             "curated_attachments_mode": cfg.parsing.multimodal.curated_attachments.mode,
+            "curation_gate": {
+                "skip_needs_review": cfg.curation.skip_needs_review,
+                "index_review_statuses": cfg.curation.index_review_statuses,
+                "index_non_searchable_visual_summaries": cfg.curation.index_non_searchable_visual_summaries,
+            },
+            "visual_filter_fields": visual_filter_fields,
             "manifest": multimodal_manifest,
         },
         "reranker": {
@@ -201,6 +225,25 @@ def print_diagnostics(payload: dict[str, Any]) -> None:
         multimodal_table.add_row(key, str(value))
     console.print(multimodal_table)
 
+    phase3_table = Table(title="Phase 3 Multimodal Controls")
+    phase3_table.add_column("Check")
+    phase3_table.add_column("Value")
+    multimodal = payload["multimodal"]
+    phase3_table.add_row("curation_gate", json.dumps(multimodal.get("curation_gate", {}), ensure_ascii=False))
+    phase3_table.add_row("vision_upload_limits", json.dumps(multimodal.get("vision_upload_limits", {}), ensure_ascii=False))
+    phase3_table.add_row(
+        "external_vision",
+        (
+            f"provider={multimodal.get('vision_provider')} "
+            f"allow={multimodal.get('allow_external_vision')} "
+            f"will_send_images={multimodal.get('external_vision_enabled')} "
+            f"api_key_env={multimodal.get('api_key_env')} "
+            f"api_key_env_exists={multimodal.get('api_key_env_exists')}"
+        ),
+    )
+    phase3_table.add_row("visual_filter_fields", json.dumps(multimodal.get("visual_filter_fields", {}), ensure_ascii=False))
+    console.print(phase3_table)
+
     for warning in payload["warnings"]:
         console.print(f"[yellow]{warning}[/yellow]")
 
@@ -233,6 +276,12 @@ def _external_vision_enabled(cfg) -> bool:
         cfg.parsing.multimodal.vision.allow_external_vision
         and provider in {"openai_compatible", "azure", "gemini", "cloud_vision"}
     )
+
+
+def _visual_filter_fields(store: LanceDBStore) -> dict[str, bool]:
+    fields = store.schema_field_names()
+    required = ("id", "occurrence_id", "asset_id", "indexed_source_path", "source_path", "searchable")
+    return {field: field in fields for field in required}
 
 
 if __name__ == "__main__":

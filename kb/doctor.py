@@ -107,6 +107,19 @@ def print_doctor(payload: dict[str, Any]) -> None:
                 f"external={multimodal.get('external_vision_enabled')} render_pages={multimodal.get('render_pages')}"
             ),
         )
+        table.add_row("curation_gate", str(multimodal.get("curation_gate", {})))
+        table.add_row("vision_upload_limits", str(multimodal.get("vision_upload_limits", {})))
+        table.add_row(
+            "external_vision",
+            (
+                f"provider={multimodal.get('vision_provider')} "
+                f"allow={multimodal.get('allow_external_vision')} "
+                f"will_send_images={multimodal.get('external_vision_enabled')} "
+                f"api_key_env={multimodal.get('api_key_env')} "
+                f"api_key_env_exists={multimodal.get('api_key_env_exists')}"
+            ),
+        )
+        table.add_row("visual_filter_fields", str(multimodal.get("visual_filter_fields", {})))
         manifest = multimodal.get("manifest", {})
         table.add_row(
             "multimodal_manifest",

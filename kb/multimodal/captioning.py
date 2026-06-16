@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import json
 import os
 from pathlib import Path
 from typing import Any
-from urllib import request
+from urllib import error, request
+
+from PIL import Image, ImageOps
 
 from kb.multimodal.assets import (
     CaptionResult,
@@ -87,6 +90,7 @@ def caption_visual_asset(
         provider_payload = _caption_with_openai_compatible(image_path=image_path, vision=vision, occurrence=occurrence)
         caption_text = str(provider_payload.get("caption") or "")
         caption_confidence = provider_payload.get("confidence")
+        caption_provider = str(provider_payload.get("caption_provider") or caption_provider)
     elif provider in {"local", "local_vision"} and vision.enabled:
         caption_text = _local_context_caption(asset, occurrence)
         caption_confidence = 0.35 if caption_text else None
@@ -138,7 +142,7 @@ def caption_visual_asset(
         architecture_notes=architecture_notes,
         uncertain_items=uncertain_items,
         text_for_embedding=text_for_embedding,
-        caption_provider=caption_provider if caption_text else ("ocr_only" if ocr_text.strip() else caption_provider),
+        caption_provider=_final_caption_provider(caption_provider, caption_text, ocr_text),
         caption_model=caption_model,
         prompt_version=prompt_version,
         ocr_engine=ocr_engine,
@@ -156,10 +160,21 @@ def _caption_with_openai_compatible(*, image_path: Path, vision, occurrence: Vis
     api_key_env = getattr(vision, "api_key_env", "OPENAI_API_KEY") or "OPENAI_API_KEY"
     api_key = os.environ.get(api_key_env)
     if not api_key:
-        return {"caption": "", "uncertain_items": [f"Missing API key env var: {api_key_env}"]}
+        return {
+            "caption": "",
+            "caption_provider": "openai_compatible_auth_error",
+            "uncertain_items": [f"Missing API key env var: {api_key_env}"],
+        }
 
     model = getattr(vision, "model", None) or "gpt-4.1-mini"
     base_url = (getattr(vision, "base_url", None) or "https://api.openai.com/v1").rstrip("/")
+    upload = _prepare_upload_image(image_path, vision)
+    if upload.get("skipped"):
+        return {
+            "caption": "",
+            "caption_provider": "openai_compatible_skipped",
+            "uncertain_items": [str(upload["reason"])],
+        }
     payload = {
         "model": model,
         "messages": [
@@ -178,7 +193,7 @@ def _caption_with_openai_compatible(*, image_path: Path, vision, occurrence: Vis
                     },
                     {
                         "type": "image_url",
-                        "image_url": {"url": _image_data_url(image_path)},
+                        "image_url": {"url": upload["data_url"]},
                     },
                 ],
             }
@@ -188,19 +203,79 @@ def _caption_with_openai_compatible(*, image_path: Path, vision, occurrence: Vis
     }
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     transport = OPENAI_COMPATIBLE_TRANSPORT or _default_openai_transport
-    response = transport(url=f"{base_url}/chat/completions", headers=headers, payload=payload)
+    response = _call_openai_transport(
+        transport=transport,
+        url=f"{base_url}/chat/completions",
+        headers=headers,
+        payload=payload,
+        timeout=int(getattr(vision, "timeout", 60) or 60),
+        max_retries=int(getattr(vision, "max_retries", 1) or 0),
+    )
+    if response.get("_error"):
+        return {
+            "caption": "",
+            "caption_provider": response.get("caption_provider", "openai_compatible_error"),
+            "uncertain_items": [str(response["_error"])],
+        }
     return _parse_openai_compatible_response(response)
 
 
-def _default_openai_transport(*, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
+def _default_openai_transport(*, url: str, headers: dict[str, str], payload: dict[str, Any], timeout: int = 60) -> dict[str, Any]:
     req = request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
         headers=headers,
         method="POST",
     )
-    with request.urlopen(req, timeout=60) as response:  # noqa: S310 - explicit opt-in external provider
+    with request.urlopen(req, timeout=timeout) as response:  # noqa: S310 - explicit opt-in external provider
         return json.loads(response.read().decode("utf-8"))
+
+
+def _call_openai_transport(
+    *,
+    transport,
+    url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    timeout: int,
+    max_retries: int,
+) -> dict[str, Any]:
+    attempts = max(1, max_retries + 1)
+    for attempt in range(attempts):
+        try:
+            return transport(url=url, headers=headers, payload=payload, timeout=timeout)
+        except error.HTTPError as exc:
+            if exc.code in {401, 403}:
+                return {
+                    "_error": f"External vision authentication failed with HTTP {exc.code}; check the configured API key environment variable.",
+                    "caption_provider": "openai_compatible_auth_error",
+                }
+            if exc.code == 429 or 500 <= exc.code <= 599:
+                if attempt + 1 < attempts:
+                    continue
+                return {
+                    "_error": f"External vision provider returned transient HTTP {exc.code}.",
+                    "caption_provider": "openai_compatible_error",
+                }
+            return {
+                "_error": f"External vision provider returned HTTP {exc.code}.",
+                "caption_provider": "openai_compatible_error",
+            }
+        except (TimeoutError, error.URLError) as exc:
+            if attempt + 1 < attempts:
+                continue
+            return {
+                "_error": f"External vision request failed or timed out: {exc}",
+                "caption_provider": "openai_compatible_error",
+            }
+        except Exception as exc:
+            if attempt + 1 < attempts:
+                continue
+            return {
+                "_error": f"External vision request failed: {exc}",
+                "caption_provider": "openai_compatible_error",
+            }
+    return {"_error": "External vision request failed.", "caption_provider": "openai_compatible_error"}
 
 
 def _parse_openai_compatible_response(response: dict[str, Any]) -> dict[str, Any]:
@@ -214,10 +289,14 @@ def _parse_openai_compatible_response(response: dict[str, Any]) -> dict[str, Any
     if isinstance(content, dict):
         parsed = content
     else:
+        content = _strip_fenced_json(str(content))
         try:
-            parsed = json.loads(str(content))
+            parsed = json.loads(content)
         except Exception:
-            parsed = {"caption": str(content)}
+            parsed = {
+                "caption": str(content),
+                "uncertain_items": ["structured parse failed"],
+            }
     return {
         "caption": str(parsed.get("caption") or ""),
         "visual_type": str(parsed.get("visual_type") or "unknown"),
@@ -229,14 +308,50 @@ def _parse_openai_compatible_response(response: dict[str, Any]) -> dict[str, Any
     }
 
 
-def _image_data_url(image_path: Path) -> str:
-    mime = {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".webp": "image/webp",
-    }.get(image_path.suffix.lower(), "image/png")
-    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
-    return f"data:{mime};base64,{encoded}"
+def _prepare_upload_image(image_path: Path, vision) -> dict[str, Any]:
+    max_pixels = int(getattr(vision, "max_upload_pixels", 4_000_000) or 4_000_000)
+    max_bytes = int(getattr(vision, "max_upload_bytes", 5_000_000) or 5_000_000)
+    resize_long_edge = int(getattr(vision, "resize_long_edge", 1600) or 1600)
+    jpeg_quality = int(getattr(vision, "jpeg_quality", 85) or 85)
+    try:
+        image = Image.open(image_path)
+        image = ImageOps.exif_transpose(image)
+        if image.mode in {"RGBA", "LA"} or (image.mode == "P" and "transparency" in image.info):
+            background = Image.new("RGB", image.size, "white")
+            rgba = image.convert("RGBA")
+            background.paste(rgba, mask=rgba.getchannel("A"))
+            image = background
+        else:
+            image = image.convert("RGB")
+
+        image.thumbnail((resize_long_edge, resize_long_edge), Image.Resampling.LANCZOS)
+        while image.width * image.height > max_pixels and min(image.size) > 1:
+            scale = (max_pixels / float(image.width * image.height)) ** 0.5
+            image = image.resize((max(1, int(image.width * scale)), max(1, int(image.height * scale))), Image.Resampling.LANCZOS)
+
+        data = _jpeg_bytes(image, jpeg_quality)
+        if len(data) > max_bytes:
+            for quality in (75, 65, 55):
+                data = _jpeg_bytes(image, quality)
+                if len(data) <= max_bytes:
+                    break
+        if len(data) > max_bytes:
+            return {"skipped": True, "reason": f"Compressed image still exceeds max_upload_bytes ({max_bytes})."}
+        return {
+            "skipped": False,
+            "data_url": "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii"),
+            "bytes": len(data),
+            "width": image.width,
+            "height": image.height,
+        }
+    except Exception as exc:
+        return {"skipped": True, "reason": f"Could not prepare image upload: {exc}"}
+
+
+def _jpeg_bytes(image: Image.Image, quality: int) -> bytes:
+    output = BytesIO()
+    image.save(output, format="JPEG", quality=max(1, min(95, int(quality))), optimize=True)
+    return output.getvalue()
 
 
 def build_text_for_embedding(
@@ -363,6 +478,28 @@ def _local_context_caption(asset: VisualAsset, occurrence: VisualOccurrence) -> 
         return ""
     location = f"page {occurrence.page_number}" if occurrence.page_number else f"slide {occurrence.slide_number}" if occurrence.slide_number else "source"
     return f"Local context summary for visual evidence from {location}: {context[:800]}"
+
+
+def _final_caption_provider(caption_provider: str, caption_text: str, ocr_text: str) -> str:
+    if caption_text:
+        return caption_provider
+    if caption_provider in {"openai_compatible_skipped", "openai_compatible_auth_error", "openai_compatible_error"}:
+        return caption_provider
+    if ocr_text.strip():
+        return "ocr_only"
+    return caption_provider
+
+
+def _strip_fenced_json(value: str) -> str:
+    text = value.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
 
 
 def _string_list(value: Any) -> list[str]:

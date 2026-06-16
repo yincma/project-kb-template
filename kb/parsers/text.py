@@ -137,6 +137,7 @@ def _frontmatter_metadata(frontmatter: dict) -> dict:
     if frontmatter.get("kb_type") != "visual_summary":
         return {}
     review_status = frontmatter.get("review_status") or frontmatter.get("status")
+    searchable = _bool_frontmatter(frontmatter.get("searchable"), True)
     metadata = {
         "kb_type": "visual_summary",
         "review_status": review_status,
@@ -150,7 +151,7 @@ def _frontmatter_metadata(frontmatter: dict) -> dict:
         "caption_model": frontmatter.get("caption_model"),
         "prompt_version": frontmatter.get("prompt_version"),
         "confidence": frontmatter.get("confidence"),
-        "searchable": True,
+        "searchable": searchable,
     }
     if frontmatter.get("source_path"):
         metadata["source_path"] = frontmatter.get("source_path")
@@ -164,12 +165,25 @@ def _frontmatter_metadata(frontmatter: dict) -> dict:
 def _should_skip_frontmatter_document(frontmatter: dict, config) -> bool:
     if frontmatter.get("kb_type") != "visual_summary":
         return False
-    review_status = str(frontmatter.get("review_status") or frontmatter.get("status") or "").strip().lower()
+    searchable = _bool_frontmatter(frontmatter.get("searchable"), True)
     curation = _cfg_value(config, "curation", None)
+    if not searchable and not _cfg_value(curation, "index_non_searchable_visual_summaries", False):
+        return True
+    review_status = str(frontmatter.get("review_status") or frontmatter.get("status") or "").strip().lower()
     if _cfg_value(curation, "skip_needs_review", True) and review_status == "needs_review":
         return True
     allowed = {str(value).lower() for value in _cfg_value(curation, "index_review_statuses", ["reviewed", "approved"])}
     return bool(review_status and review_status not in allowed)
+
+
+def _bool_frontmatter(value, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _should_parse_referenced_attachments(frontmatter: dict, config) -> bool:

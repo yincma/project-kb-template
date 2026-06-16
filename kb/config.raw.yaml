@@ -110,6 +110,12 @@ parsing:
       prompt_version: "vision-caption-v1"
       max_caption_chars: 4000
       max_ocr_chars: 4000
+      max_upload_pixels: 4000000
+      max_upload_bytes: 5000000
+      resize_long_edge: 1600
+      jpeg_quality: 85
+      timeout: 60
+      max_retries: 1
     curated_attachments:
       mode: "off"
       allowed_roots:
@@ -164,3 +170,4 @@ curation:
     - reviewed
     - approved
   skip_needs_review: true
+  index_non_searchable_visual_summaries: false

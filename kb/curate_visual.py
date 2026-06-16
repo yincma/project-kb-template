@@ -27,9 +27,14 @@ def main() -> None:
     parser.add_argument("--source-filter", default=None)
     parser.add_argument("--visual-type", default=None)
     parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--only-searchable", action="store_true", default=True)
+    parser.add_argument(
+        "--only-searchable",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Export only searchable visual evidence by default; use --no-only-searchable for audit notes.",
+    )
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing generated notes")
+    parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=False, help="Overwrite existing generated notes")
     parser.add_argument("--force", action="store_true", help="Deprecated alias for --overwrite")
     args = parser.parse_args()
 
@@ -49,9 +54,14 @@ def main() -> None:
         f"[green]Done.[/green] exported={payload['exported']} "
         f"skipped_existing={payload['skipped_existing']} "
         f"skipped_not_searchable={payload['skipped_not_searchable']} "
+        f"skipped_non_reviewable={payload['skipped_non_reviewable']} "
         f"skipped_no_caption_or_ocr={payload['skipped_no_caption_or_ocr']} "
+        f"dry_run={payload['dry_run']} "
         f"output_dir={payload['output_dir']}"
     )
+    if args.dry_run:
+        for path in payload.get("planned_paths", []):
+            console.print(f"[cyan]Would export:[/cyan] {path}")
 
 
 def curate_visual_summaries(
@@ -81,22 +91,26 @@ def curate_visual_summaries(
     exported = 0
     skipped_existing = 0
     skipped_not_searchable = 0
+    skipped_non_reviewable = 0
     skipped_no_caption_or_ocr = 0
     skipped_filtered = 0
+    exported_non_searchable = 0
     seen_sources: set[str] = set()
     seen_assets: set[str] = set()
     seen_occurrences: set[str] = set()
+    planned_paths: list[str] = []
     for caption in captions:
-        if only_searchable and not caption.get("searchable"):
+        caption_searchable = bool(caption.get("searchable"))
+        has_caption_or_ocr = bool(str(caption.get("caption") or "").strip() or str(caption.get("ocr_text") or "").strip())
+        if only_searchable and not caption_searchable:
             skipped_not_searchable += 1
-            continue
-        if not str(caption.get("caption") or "").strip() and not str(caption.get("ocr_text") or "").strip():
-            skipped_no_caption_or_ocr += 1
+            if not has_caption_or_ocr:
+                skipped_no_caption_or_ocr += 1
             continue
         occurrence = occurrences.get(str(caption.get("occurrence_id")))
         asset = assets.get(str(caption.get("asset_id")))
         if not occurrence or not asset:
-            skipped_filtered += 1
+            skipped_non_reviewable += 1
             continue
         if source_filter and source_filter not in str(occurrence.get("source_path", "")):
             skipped_filtered += 1
@@ -111,8 +125,11 @@ def curate_visual_summaries(
         if note_path.exists() and not overwrite:
             skipped_existing += 1
             continue
+        planned_paths.append(_display_path(note_path, cfg.root_path))
         if not dry_run:
             note_path.write_text(_render_note(asset, occurrence, caption, review_status=review_status), encoding="utf-8")
+        if not caption_searchable:
+            exported_non_searchable += 1
         seen_sources.add(str(occurrence.get("source_path") or ""))
         seen_assets.add(str(asset.get("asset_id") or ""))
         seen_occurrences.add(str(occurrence.get("occurrence_id") or ""))
@@ -120,16 +137,19 @@ def curate_visual_summaries(
 
     return {
         "exported": exported,
-        "skipped": skipped_existing + skipped_not_searchable + skipped_no_caption_or_ocr + skipped_filtered,
+        "skipped": skipped_existing + skipped_not_searchable + skipped_non_reviewable + skipped_filtered,
         "skipped_existing": skipped_existing,
         "skipped_not_searchable": skipped_not_searchable,
+        "skipped_non_reviewable": skipped_non_reviewable,
         "skipped_no_caption_or_ocr": skipped_no_caption_or_ocr,
         "skipped_filtered": skipped_filtered,
+        "exported_non_searchable": exported_non_searchable,
         "sources_count": len(seen_sources),
         "assets_count": len(seen_assets),
         "occurrences_count": len(seen_occurrences),
         "dry_run": dry_run,
         "output_dir": _display_path(output_root, cfg.root_path),
+        "planned_paths": planned_paths,
     }
 
 
@@ -184,6 +204,7 @@ def _render_note(
         "caption_model": caption.get("caption_model"),
         "prompt_version": caption.get("prompt_version"),
         "confidence": caption.get("confidence"),
+        "searchable": bool(caption.get("searchable")),
         "source_refs": [source_ref],
     }
     page_or_slide = _page_or_slide(occurrence)
@@ -197,6 +218,7 @@ def _render_note(
 - Source: `{source_path}`
 - Attachment: `{attachment_path}`
 - {page_or_slide}
+- Searchable: `{bool(caption.get("searchable"))}`
 
 ## Context Title
 

@@ -72,12 +72,42 @@ def main() -> None:
         table.add_row(
             str(index),
             score,
-            str(result["source_path"]),
+            _source_display(result),
             str(result["heading"] or ""),
             str(result["chunk_index"]),
             str(result["snippet"]),
         )
     console.print(table)
+
+
+def _source_display(result: dict) -> str:
+    source = str(result.get("source_path") or "")
+    if result.get("asset_type") != "visual":
+        return source
+    location = ""
+    if result.get("page_number"):
+        location = f"page={result['page_number']}"
+    elif result.get("slide_number"):
+        location = f"slide={result['slide_number']}"
+    details = [
+        source,
+        "asset_type=visual",
+        f"visual_type={result.get('visual_type') or 'unknown'}",
+    ]
+    if location:
+        details.append(location)
+    if result.get("attachment_path"):
+        details.append(f"attachment={_middle_truncate(str(result['attachment_path']))}")
+    if result.get("indexed_source_path"):
+        details.append(f"indexed={_middle_truncate(str(result['indexed_source_path']))}")
+    return "\n".join(details)
+
+
+def _middle_truncate(value: str, max_chars: int = 72) -> str:
+    if len(value) <= max_chars:
+        return value
+    keep = max(8, (max_chars - 3) // 2)
+    return value[:keep] + "..." + value[-keep:]
 
 
 if __name__ == "__main__":

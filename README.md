@@ -182,12 +182,31 @@ docs/_generated/visual_summaries/needs_review/
 
 Each note embeds the generated asset with Obsidian syntax, keeps structured `source_refs`, and includes source path, page/slide, attachment path, image hash, caption provider, prompt version, OCR text, caption, entities, relationships, architecture notes, and uncertain items.
 
-Generated notes default to `review_status: needs_review` and are excluded from the default curated index. After review, set `review_status: reviewed` / `status: reviewed` or move the note into a formal `docs/` folder, then rebuild the curated index.
+Generated notes default to `review_status: needs_review` and are excluded from the default curated index. After review, set `review_status: reviewed` / `status: reviewed` or move the note into a formal `docs/` folder, then rebuild the curated index. Notes with `searchable: false` stay out of vector search even if reviewed, unless you explicitly change the curation policy.
+
+Useful export modes:
+
+```bash
+# Default: export only searchable needs_review visual summaries
+uv run project-kb-curate-visual --config kb/config.raw.yaml
+
+# Preview without writing files
+uv run project-kb-curate-visual --config kb/config.raw.yaml --dry-run
+
+# Audit mode: include non-searchable metadata notes; not recommended for curated search
+uv run project-kb-curate-visual --config kb/config.raw.yaml --no-only-searchable
+```
 
 Visual assets are saved under:
 
 ```text
 docs/_attachments/kb_assets/<source_stem>_<source_hash>/
+```
+
+Example:
+
+```text
+docs/_attachments/kb_assets/rfp_ab12cd/rfp_ab12cd_p038_page_dpi180_9f8e7d.png
 ```
 
 The curated scanner does not recursively index `docs/_attachments/`. If you need opt-in attachment parsing, set:
@@ -208,6 +227,7 @@ Privacy defaults:
 
 - External vision providers are disabled by default.
 - `allow_external_vision: false` prevents image upload even if API keys exist.
+- If external vision is enabled, the provider receives a resized/compressed copy; the local attachment image is not modified.
 - Default raw intake uses conservative limits such as `render_pages: auto`, `max_rendered_pages_per_file`, `max_visual_assets_per_file`, `max_image_pixels`, and icon/logo skipping.
 - OCR can read text inside images, but it does not replace visual understanding. Caption quality depends on the configured provider.
 
@@ -248,9 +268,20 @@ parsing:
       model: "<vision_model_name>"
       base_url: null
       api_key_env: "OPENAI_API_KEY"
+      resize_long_edge: 1600
+      max_upload_bytes: 5000000
       # Images are uploaded only when this is true.
       allow_external_vision: true
 ```
+
+Visual query from CLI:
+
+```bash
+uv run project-kb-query "AWS VPC architecture diagram" --config kb/config.yaml
+uv run project-kb-query "AWS VPC architecture diagram" --config kb/config.yaml --json
+```
+
+Visual results include the original `source_path`, `indexed_source_path`, and `attachment_path`. Open `attachment_path` in Obsidian or Finder to inspect the image. Use `read_kb_result` for visual search results; `read_kb_source` remains for older text-source workflows.
 
 ## MCP Tools
 

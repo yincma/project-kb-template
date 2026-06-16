@@ -189,7 +189,7 @@ def read_kb_result(
     """Read a bounded KB result, including visual summaries with attachment provenance."""
     cfg, store, _ = _load_runtime()
     max_chars = max(1, min(int(max_chars), cfg.retrieval.max_return_chars))
-    row = _find_result_row(
+    row, matched_by = _find_result_row(
         store,
         chunk_id=chunk_id or result_id,
         occurrence_id=occurrence_id,
@@ -240,6 +240,7 @@ def read_kb_result(
         "occurrence_id": occurrence_id or (row or {}).get("occurrence_id"),
         "page_number": (row or {}).get("page_number"),
         "slide_number": (row or {}).get("slide_number"),
+        "matched_by": matched_by,
         "read_from": read_from,
         "max_chars": max_chars,
         "truncated": truncated,
@@ -267,8 +268,12 @@ def _compact_metadata(result: dict[str, Any]) -> dict[str, Any]:
     return {
         key: result.get(key)
         for key in (
+            "result_id",
+            "chunk_id",
             "indexed_source_path",
             "asset_type",
+            "asset_id",
+            "occurrence_id",
             "visual_type",
             "attachment_path",
             "image_hash",
@@ -325,26 +330,94 @@ def _find_result_row(
     asset_id: str | None,
     indexed_source_path: str | None,
     source_path: str | None,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, str | None]:
     if not store.table_exists():
-        return None
-    try:
-        rows = _arrowish_to_rows(store.open_table().to_arrow())
-    except Exception:
-        rows = store.preview_rows(1000)
+        return None, None
+    field_names = store.schema_field_names()
+    table = None
+    lookups: list[tuple[str, str, str | None, int]] = [
+        ("id", "id", chunk_id, 1),
+        ("occurrence_id", "occurrence_id", occurrence_id, 1),
+        ("asset_id", "asset_id", asset_id, 20),
+        ("indexed_source_path", "indexed_source_path", _normalize_lookup_path(indexed_source_path, store.config.root_path), 1),
+        ("source_path", "source_path", _normalize_lookup_path(source_path, store.config.root_path), 1),
+    ]
+    for matched_by, field, value, limit in lookups:
+        if not value or field not in field_names:
+            continue
+        if table is None:
+            table = store.open_table()
+        rows = _where_rows(table, f"{field} = {_sql_quote(value)}", limit=limit)
+        if rows:
+            if matched_by == "asset_id":
+                rows = sorted(rows, key=lambda row: str(row.get("indexed_at") or ""), reverse=True)
+            return rows[0], matched_by
+
+    rows = _fallback_rows(store)
     for row in rows:
         metadata = _metadata(row)
         if chunk_id and (row.get("id") == chunk_id or metadata.get("chunk_id") == chunk_id):
-            return row
+            return row, "id"
         if occurrence_id and (row.get("occurrence_id") == occurrence_id or metadata.get("occurrence_id") == occurrence_id):
-            return row
+            return row, "occurrence_id"
         if asset_id and (row.get("asset_id") == asset_id or metadata.get("asset_id") == asset_id):
-            return row
-        if indexed_source_path and row.get("indexed_source_path") == indexed_source_path:
-            return row
-        if source_path and row.get("source_path") == source_path and not indexed_source_path:
-            return row
-    return None
+            return row, "asset_id"
+        normalized_indexed = _normalize_lookup_path(indexed_source_path, store.config.root_path)
+        normalized_source = _normalize_lookup_path(source_path, store.config.root_path)
+        if normalized_indexed and _normalize_lookup_path(row.get("indexed_source_path"), store.config.root_path) == normalized_indexed:
+            return row, "indexed_source_path"
+        if normalized_source and _normalize_lookup_path(row.get("source_path"), store.config.root_path) == normalized_source and not indexed_source_path:
+            return row, "source_path"
+    return None, None
+
+
+def _where_rows(table, where_sql: str, *, limit: int) -> list[dict[str, Any]]:
+    try:
+        builder = table.search().where(where_sql).limit(limit)
+        return _builder_rows(builder)
+    except Exception:
+        pass
+    try:
+        scanner = table.to_lance().scanner(filter=where_sql, limit=limit)
+        return _arrowish_to_rows(scanner.to_table())
+    except Exception:
+        return []
+
+
+def _builder_rows(builder) -> list[dict[str, Any]]:
+    if hasattr(builder, "to_list"):
+        return list(builder.to_list())
+    if hasattr(builder, "to_arrow"):
+        return _arrowish_to_rows(builder.to_arrow())
+    if hasattr(builder, "to_table"):
+        return _arrowish_to_rows(builder.to_table())
+    return list(builder)
+
+
+def _fallback_rows(store: LanceDBStore) -> list[dict[str, Any]]:
+    try:
+        return store.preview_rows(1000)
+    except Exception:
+        return []
+
+
+def _normalize_lookup_path(value: str | None, root: Path) -> str | None:
+    if not value:
+        return None
+    text = str(value).replace("\\", "/")
+    path = Path(text)
+    if path.is_absolute():
+        try:
+            text = path.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            text = path.as_posix()
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
+def _sql_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _metadata(row: dict[str, Any]) -> dict[str, Any]:

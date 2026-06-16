@@ -324,6 +324,8 @@ def format_result(row: dict[str, Any], query: str, max_snippet_chars: int, *, in
     attachment_path = _field_or_metadata(row, metadata, "attachment_path")
     visual_type = _field_or_metadata(row, metadata, "visual_type")
     image_hash = _field_or_metadata(row, metadata, "image_hash")
+    asset_id = _field_or_metadata(row, metadata, "asset_id")
+    occurrence_id = _field_or_metadata(row, metadata, "occurrence_id")
     indexed_source_path = _field_or_metadata(row, metadata, "indexed_source_path")
     caption_provider = _field_or_metadata(row, metadata, "caption_provider")
     caption_model = _field_or_metadata(row, metadata, "caption_model")
@@ -335,12 +337,16 @@ def format_result(row: dict[str, Any], query: str, max_snippet_chars: int, *, in
         location = f"page {page_number}" if page_number else f"slide {slide_number}" if slide_number else "source"
         snippet = f"Visual summary from source {location}: {snippet}"
     result = {
+        "result_id": row.get("id"),
+        "chunk_id": metadata.get("chunk_id") or row.get("id"),
         "score": _score_from_row(row),
         "indexed_source_path": indexed_source_path or row.get("indexed_source_path"),
         "source_path": row.get("source_path"),
         "heading": row.get("heading") or None,
         "chunk_index": row.get("chunk_index"),
         "asset_type": asset_type or None,
+        "asset_id": asset_id or None,
+        "occurrence_id": occurrence_id or None,
         "visual_type": visual_type or None,
         "attachment_path": attachment_path or None,
         "image_hash": image_hash or None,

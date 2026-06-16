@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import os
 import warnings
 
 
@@ -33,6 +34,9 @@ class BGEEmbedder:
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
+        if os.environ.get("PROJECT_KB_TEST_FAKE_EMBEDDINGS") == "1":
+            dimension = max(1, int(os.environ.get("PROJECT_KB_TEST_FAKE_EMBEDDING_DIM", "3")))
+            return [[1.0] + [0.0] * (dimension - 1) for _ in texts]
         model = self._load_model()
         all_vectors: list[list[float]] = []
         for start in range(0, len(texts), self.batch_size):

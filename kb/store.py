@@ -132,6 +132,12 @@ class MultimodalVisionConfig(BaseModel):
     prompt_version: str = "vision-caption-v1"
     max_caption_chars: int = 4000
     max_ocr_chars: int = 4000
+    max_upload_pixels: int = 4_000_000
+    max_upload_bytes: int = 5_000_000
+    resize_long_edge: int = 1600
+    jpeg_quality: int = 85
+    timeout: int = 60
+    max_retries: int = 1
 
 
 class CuratedAttachmentsConfig(BaseModel):
@@ -229,6 +235,7 @@ class RetrievalConfig(BaseModel):
 class CurationConfig(BaseModel):
     index_review_statuses: list[str] = Field(default_factory=lambda: ["reviewed", "approved"])
     skip_needs_review: bool = True
+    index_non_searchable_visual_summaries: bool = False
 
 
 class ProjectKBConfig(BaseModel):
