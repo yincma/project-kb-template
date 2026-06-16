@@ -9,8 +9,11 @@ import yaml
 
 from kb.curate_visual import curate_visual_summaries
 from kb.ingest import index_project
+from kb.mcp_server import clear_runtime_cache, read_kb_result
 from kb.multimodal.assets import caption_cache_key, ocr_cache_key, stable_occurrence_id
+import kb.multimodal.captioning as captioning
 from kb.multimodal.manifest import MultimodalManifest
+from kb.multimodal.extraction import should_render_pdf_page
 from kb.parsers import parse_file
 from kb.parsers.pdf import parse_pdf_file
 from kb.parsers.text import parse_text_file
@@ -139,8 +142,8 @@ def test_visual_summary_frontmatter_becomes_visual_metadata(tmp_path: Path):
     note.write_text(
         """---
 kb_type: visual_summary
-review_status: needs_review
-status: needs_review
+review_status: reviewed
+status: reviewed
 source_path: sources/sample.pdf
 attachment_path: docs/_attachments/kb_assets/sample/sample.png
 page_number: 3
@@ -166,6 +169,32 @@ AWS VPC architecture diagram.
     assert parsed.sections[0].metadata["source_path"] == "sources/sample.pdf"
     assert parsed.sections[0].metadata["attachment_path"].endswith("sample.png")
     assert parsed.sections[0].page_number == 3
+
+
+def test_needs_review_visual_summary_is_skipped_but_plain_markdown_indexes(tmp_path: Path):
+    cfg = _config(tmp_path, multimodal=False)
+    visual_note = tmp_path / "docs" / "needs_review_visual.md"
+    visual_note.parent.mkdir(parents=True)
+    visual_note.write_text(
+        """---
+kb_type: visual_summary
+review_status: needs_review
+source_path: sources/sample.pdf
+attachment_path: docs/_attachments/kb_assets/sample/sample.png
+---
+
+AWS VPC architecture.
+""",
+        encoding="utf-8",
+    )
+    plain_note = tmp_path / "docs" / "plain.md"
+    plain_note.write_text("# Plain\n\nNormal curated note.\n", encoding="utf-8")
+
+    skipped = parse_text_file(visual_note, config=cfg)
+    plain = parse_text_file(plain_note, config=cfg)
+
+    assert skipped.sections == []
+    assert plain.sections and plain.sections[0].text.startswith("# Plain")
 
 
 def test_referenced_only_requires_explicit_markdown_reference_and_allowed_root(tmp_path: Path):
@@ -197,14 +226,149 @@ def test_raw_to_curated_visual_summary_round_trip(tmp_path: Path, monkeypatch: p
     export_result = curate_visual_summaries(config_path=raw_config)
     curated_result = index_project(curated_config, rebuild=True)
     cfg = load_config(curated_config)
-    payload = ProjectRetriever(config=cfg, store=LanceDBStore(cfg), embedder=FakeEmbedder()).search("AWS VPC", top_k=1)
 
     assert raw_result["visual_chunks"] >= 1
     assert export_result["exported"] >= 1
+    assert curated_result["chunks"] == 0
+
+    for note in (tmp_path / "docs" / "_generated" / "visual_summaries" / "needs_review").glob("*.md"):
+        note.write_text(note.read_text(encoding="utf-8").replace("review_status: needs_review", "review_status: reviewed").replace("status: needs_review", "status: reviewed"), encoding="utf-8")
+    curated_result = index_project(curated_config, rebuild=True)
+    payload = ProjectRetriever(config=cfg, store=LanceDBStore(cfg), embedder=FakeEmbedder()).search("AWS VPC", top_k=1)
+
     assert curated_result["chunks"] >= 1
     assert payload["index_role"] == "curated"
     assert payload["results"][0]["asset_type"] == "visual"
     assert payload["results"][0]["attachment_path"].startswith("docs/_attachments/kb_assets/")
+
+
+def test_read_kb_result_returns_visual_summary_and_attachment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    curated_config = _write_config(tmp_path, raw=False)
+    note = tmp_path / "docs" / "visual_reviewed.md"
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text(
+        """---
+kb_type: visual_summary
+review_status: reviewed
+status: reviewed
+source_path: sources/sample.pdf
+indexed_source_path: docs/visual_reviewed.md
+attachment_path: docs/_attachments/kb_assets/sample/diagram.png
+page_number: 2
+image_hash: abc
+asset_id: asset_abc
+occurrence_id: occ_abc
+visual_type: architecture_diagram
+caption_provider: local
+prompt_version: vision-caption-v1
+---
+
+# Visual Summary
+
+AWS VPC architecture visual summary.
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("kb.ingest.build_embedder", lambda cfg: FakeEmbedder())
+    monkeypatch.setenv("KB_CONFIG", str(curated_config))
+    clear_runtime_cache()
+
+    index_project(curated_config, rebuild=True)
+    payload = read_kb_result(
+        source_path="sources/sample.pdf",
+        indexed_source_path="docs/visual_reviewed.md",
+        asset_type="visual",
+        attachment_path="docs/_attachments/kb_assets/sample/diagram.png",
+        occurrence_id="occ_abc",
+    )
+
+    assert "AWS VPC architecture visual summary" in payload["text"]
+    assert payload["attachment_path"].endswith("diagram.png")
+    assert payload["source_path"] == "sources/sample.pdf"
+
+
+def test_openai_compatible_external_block_does_not_call_transport(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    cfg = _config(tmp_path, multimodal=True, provider="openai_compatible", vision_enabled=True)
+    cfg.parsing.multimodal.vision.allow_external_vision = False
+    image = tmp_path / "sources" / "sample_image.png"
+    _write_png(image, "AWS")
+
+    def fail_transport(**kwargs):
+        raise AssertionError("transport should not be called")
+
+    monkeypatch.setattr(captioning, "OPENAI_COMPATIBLE_TRANSPORT", fail_transport)
+    monkeypatch.setattr(captioning, "_run_ocr", lambda image_path, ocr_engine: {"text": "AWS OCR", "confidence": 0.7})
+    parsed = parse_file(image, config=cfg)
+
+    assert parsed.sections
+    assert parsed.sections[0].metadata["caption_provider"] == "ocr_only"
+
+
+def test_openai_compatible_mock_response_creates_structured_caption(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    cfg = _config(tmp_path, multimodal=True, provider="openai_compatible", vision_enabled=True)
+    cfg.parsing.multimodal.vision.allow_external_vision = True
+    cfg.parsing.multimodal.vision.model = "vision-test"
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    calls = []
+
+    def fake_transport(**kwargs):
+        calls.append(kwargs)
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"caption":"Architecture shows AWS VPC to RDS","visual_type":"architecture_diagram","entities":["AWS","VPC","RDS"],"relationships":["VPC -> RDS"],"architecture_notes":["Database tier is shown"],"uncertain_items":["CIDR unknown"],"confidence":0.82}'
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(captioning, "OPENAI_COMPATIBLE_TRANSPORT", fake_transport)
+    image = tmp_path / "sources" / "sample_image.png"
+    _write_png(image, "")
+
+    parsed = parse_file(image, config=cfg)
+
+    assert calls
+    assert parsed.sections[0].metadata["caption_provider"] == "openai_compatible"
+    assert parsed.sections[0].metadata["visual_type"] == "architecture_diagram"
+    assert "VPC -> RDS" in parsed.sections[0].text
+
+
+def test_pdf_image_area_ratio_uses_displayed_bbox_not_pixel_area():
+    class FakeRect:
+        width = 400
+        height = 400
+
+    class FakeSmallLogoPage:
+        rect = FakeRect()
+
+        def get_images(self, full=True):
+            return [object()]
+
+        def get_image_info(self, xrefs=True):
+            return [{"width": 3000, "height": 3000, "bbox": (10, 10, 30, 30)}]
+
+        def get_drawings(self):
+            return []
+
+    class FakeLargeDisplayedImagePage(FakeSmallLogoPage):
+        def get_image_info(self, xrefs=True):
+            return [{"width": 50, "height": 50, "bbox": (0, 0, 360, 360)}]
+
+    cfg = _config(Path("/tmp/project-kb-test"), multimodal=True)
+    cfg.parsing.multimodal.pdf.render_pages = "auto"
+    cfg.parsing.multimodal.pdf.min_page_text_chars = 0
+    cfg.parsing.multimodal.pdf.min_image_area_ratio_for_render = 0.25
+    cfg.parsing.multimodal.pdf.min_drawing_count_for_render = 99
+
+    small = should_render_pdf_page(FakeSmallLogoPage(), "native text", cfg)
+    large = should_render_pdf_page(FakeLargeDisplayedImagePage(), "native text", cfg)
+
+    assert small.image_area_ratio < 0.01
+    assert "image_area_ratio" not in small.reasons
+    assert large.image_area_ratio > 0.25
+    assert "image_area_ratio" in large.reasons
 
 
 def test_multimodal_disabled_preserves_old_image_skip_behavior(tmp_path: Path):
@@ -253,7 +417,13 @@ def _write_config(tmp_path: Path, *, raw: bool) -> Path:
         "scan": {
             "source_dirs": ["sources"] if raw else ["docs"],
             "include_patterns": ["**/*.png", "**/*.pdf"] if raw else ["**/*.md"],
-            "exclude_patterns": ["docs/_attachments/**", "docs/_templates/**", "docs/99_Inbox/**"],
+            "exclude_patterns": [
+                "docs/_attachments/**",
+                "docs/_templates/**",
+                "docs/99_Inbox/**",
+                "docs/_generated/visual_summaries/needs_review/**",
+                "docs/_generated/**/needs_review/**",
+            ],
         },
         "chunking": {"chunk_size": 1000, "chunk_overlap": 120},
         "embedding": {"model_name": "fake", "batch_size": 8},
@@ -275,6 +445,9 @@ def _write_config(tmp_path: Path, *, raw: bool) -> Path:
                 "vision": {
                     "enabled": True,
                     "provider": "local",
+                    "model": None,
+                    "base_url": None,
+                    "api_key_env": "OPENAI_API_KEY",
                     "allow_external_vision": False,
                     "prompt_version": "vision-caption-v1",
                 },
@@ -282,6 +455,7 @@ def _write_config(tmp_path: Path, *, raw: bool) -> Path:
             },
         },
         "retrieval": {"mode": "hybrid", "top_k": 5, "candidate_k": 20, "max_concurrent_queries": 1},
+        "curation": {"index_review_statuses": ["reviewed", "approved"], "skip_needs_review": True},
     }
     config_path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return config_path
@@ -327,4 +501,3 @@ def _write_duplicate_image_pdf(path: Path, image_bytes: bytes) -> None:
         page.insert_image(fitz.Rect(40, 80, 260, 240), stream=image_bytes)
     document.save(path)
     document.close()
-

@@ -244,7 +244,7 @@ def should_render_pdf_page(page, native_text: str, config) -> RenderDecision:
     try:
         page_area = float(page.rect.width * page.rect.height) or 1.0
         infos = page.get_image_info(xrefs=True)
-        image_area = sum(float(info.get("width", 0) or 0) * float(info.get("height", 0) or 0) for info in infos)
+        image_area = sum(_displayed_image_area(info) for info in infos)
         image_area_ratio = min(1.0, image_area / page_area) if page_area else 0.0
     except Exception:
         image_area_ratio = 0.0
@@ -370,3 +370,17 @@ def _render_mode(pdf_cfg) -> str:
     if getattr(pdf_cfg, "render_all_pages", None) is True and getattr(pdf_cfg, "render_pages", "off") in {"off", None}:
         return "all"
     return getattr(pdf_cfg, "render_pages", "off") or "off"
+
+
+def _displayed_image_area(info: dict[str, Any]) -> float:
+    bbox = info.get("bbox")
+    if bbox is not None:
+        try:
+            if hasattr(bbox, "width") and hasattr(bbox, "height"):
+                return max(0.0, float(bbox.width)) * max(0.0, float(bbox.height))
+            values = list(bbox)
+            if len(values) >= 4:
+                return max(0.0, float(values[2]) - float(values[0])) * max(0.0, float(values[3]) - float(values[1]))
+        except Exception:
+            return 0.0
+    return 0.0

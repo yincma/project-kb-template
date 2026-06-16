@@ -103,6 +103,8 @@ parsing:
       enabled: false
       provider: "ocr_only"
       model: null
+      base_url: null
+      api_key_env: "OPENAI_API_KEY"
       allow_external_vision: false
       cache_by_hash: true
       prompt_version: "vision-caption-v1"
@@ -156,3 +158,9 @@ retrieval:
         weight: 0.06
   max_snippet_chars: 320
   max_return_chars: 6000
+
+curation:
+  index_review_statuses:
+    - reviewed
+    - approved
+  skip_needs_review: true

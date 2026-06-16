@@ -115,6 +115,8 @@ def test_curated_config_targets_docs_and_excludes_non_curated_paths(tmp_path: Pa
         "docs/_attachments/**",
         "docs/_templates/**",
         "docs/99_Inbox/**",
+        "docs/_generated/visual_summaries/needs_review/**",
+        "docs/_generated/**/needs_review/**",
     ):
         assert pattern in scan["exclude_patterns"]
 
@@ -123,6 +125,7 @@ def test_curated_config_targets_docs_and_excludes_non_curated_paths(tmp_path: Pa
     _write(tmp_path / "docs" / "_templates" / "template.md", "# Template\n")
     _write(tmp_path / "docs" / "99_Inbox" / "draft.md", "# Draft\n")
     _write(tmp_path / "docs" / "_attachments" / "asset.md", "# Asset\n")
+    _write(tmp_path / "docs" / "_generated" / "visual_summaries" / "needs_review" / "draft.md", "# Draft\n")
     _write(tmp_path / "docs" / "01_Maps" / "Knowledge_Vault.canvas", "{}\n")
 
     cfg = ProjectKBConfig(project_root=str(tmp_path))

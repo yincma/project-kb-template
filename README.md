@@ -170,6 +170,7 @@ Recommended visual workflow:
 uv run project-kb-ingest --config kb/config.raw.yaml --rebuild
 uv run project-kb-query "architecture diagram AWS VPC" --config kb/config.raw.yaml
 uv run project-kb-curate-visual --config kb/config.raw.yaml
+# review generated notes, then set review_status: reviewed or move them to a formal docs/ folder
 uv run project-kb-ingest --config kb/config.yaml --rebuild
 ```
 
@@ -180,6 +181,8 @@ docs/_generated/visual_summaries/needs_review/
 ```
 
 Each note embeds the generated asset with Obsidian syntax, keeps structured `source_refs`, and includes source path, page/slide, attachment path, image hash, caption provider, prompt version, OCR text, caption, entities, relationships, architecture notes, and uncertain items.
+
+Generated notes default to `review_status: needs_review` and are excluded from the default curated index. After review, set `review_status: reviewed` / `status: reviewed` or move the note into a formal `docs/` folder, then rebuild the curated index.
 
 Visual assets are saved under:
 
@@ -242,6 +245,10 @@ parsing:
     vision:
       enabled: true
       provider: "openai_compatible"
+      model: "<vision_model_name>"
+      base_url: null
+      api_key_env: "OPENAI_API_KEY"
+      # Images are uploaded only when this is true.
       allow_external_vision: true
 ```
 
@@ -252,6 +259,7 @@ search_project_kb_fast   Default tool, top_k=5, candidate_k=20, RRF, no full tex
 search_project_kb        Fast alias for compatibility
 search_project_kb_deep   Deep tool, top_k=8, candidate_k=50, BGE cross-encoder, no full text
 read_kb_source           Reads bounded cached/source text only when snippets are insufficient
+read_kb_result           Reads a specific result; visual results return Markdown summary and attachment_path
 kb_status
 ```
 

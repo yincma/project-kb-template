@@ -125,6 +125,8 @@ class MultimodalVisionConfig(BaseModel):
     enabled: bool = False
     provider: Literal["stub", "ocr_only", "local", "local_vision", "openai_compatible", "azure", "gemini", "cloud_vision"] = "ocr_only"
     model: str | None = None
+    base_url: str | None = None
+    api_key_env: str = "OPENAI_API_KEY"
     allow_external_vision: bool = False
     cache_by_hash: bool = True
     prompt_version: str = "vision-caption-v1"
@@ -224,6 +226,11 @@ class RetrievalConfig(BaseModel):
     max_return_chars: int = 6000
 
 
+class CurationConfig(BaseModel):
+    index_review_statuses: list[str] = Field(default_factory=lambda: ["reviewed", "approved"])
+    skip_needs_review: bool = True
+
+
 class ProjectKBConfig(BaseModel):
     profile: Literal["lite", "balanced", "accurate"] = "balanced"
     project_root: str = "."
@@ -234,6 +241,7 @@ class ProjectKBConfig(BaseModel):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     parsing: ParsingConfig = Field(default_factory=ParsingConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    curation: CurationConfig = Field(default_factory=CurationConfig)
 
     _config_path: Path | None = PrivateAttr(default=None)
     _base_dir: Path | None = PrivateAttr(default=None)

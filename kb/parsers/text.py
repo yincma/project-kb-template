@@ -32,6 +32,9 @@ def parse_text_file(path: Path, config=None) -> ParsedDocument:
         return ParsedDocument(path=path, warnings=warnings)
 
     frontmatter, body = _markdown_frontmatter(text) if ext == ".md" else ({}, text)
+    if ext == ".md" and _should_skip_frontmatter_document(frontmatter, config):
+        return ParsedDocument(path=path, warnings=warnings)
+
     metadata = _frontmatter_metadata(frontmatter)
     section = ParsedSection(
         text=body if frontmatter else text,
@@ -133,8 +136,10 @@ def _markdown_frontmatter(text: str) -> tuple[dict, str]:
 def _frontmatter_metadata(frontmatter: dict) -> dict:
     if frontmatter.get("kb_type") != "visual_summary":
         return {}
+    review_status = frontmatter.get("review_status") or frontmatter.get("status")
     metadata = {
         "kb_type": "visual_summary",
+        "review_status": review_status,
         "asset_type": "visual",
         "visual_type": frontmatter.get("visual_type"),
         "attachment_path": frontmatter.get("attachment_path"),
@@ -154,6 +159,17 @@ def _frontmatter_metadata(frontmatter: dict) -> dict:
         if value not in (None, ""):
             metadata[field] = int(value)
     return {key: value for key, value in metadata.items() if value is not None}
+
+
+def _should_skip_frontmatter_document(frontmatter: dict, config) -> bool:
+    if frontmatter.get("kb_type") != "visual_summary":
+        return False
+    review_status = str(frontmatter.get("review_status") or frontmatter.get("status") or "").strip().lower()
+    curation = _cfg_value(config, "curation", None)
+    if _cfg_value(curation, "skip_needs_review", True) and review_status == "needs_review":
+        return True
+    allowed = {str(value).lower() for value in _cfg_value(curation, "index_review_statuses", ["reviewed", "approved"])}
+    return bool(review_status and review_status not in allowed)
 
 
 def _should_parse_referenced_attachments(frontmatter: dict, config) -> bool:

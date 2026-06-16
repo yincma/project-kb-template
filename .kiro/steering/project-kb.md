@@ -36,7 +36,7 @@ The knowledge base applies domain-aware ranking boosts and may use a local high-
 
 If search results are insufficient, say so clearly and do not invent missing details.
 
-Call `read_kb_source` only when the returned snippet is not enough, and keep `max_chars` small.
+Call `read_kb_source` only when the returned snippet is not enough, and keep `max_chars` small. For visual search results, prefer `read_kb_result` with `indexed_source_path`, `attachment_path`, and `occurrence_id`.
 
 Do not modify, delete, rebuild, or reindex the knowledge base through MCP. The MCP server intentionally exposes only read-only tools.
 
@@ -50,7 +50,7 @@ When organizing knowledge, client inputs, requirements, capabilities, case studi
 
 When the user says the raw index is complete, proactively start the Obsidian curation flow: check raw index status, inventory `sources/`, query raw KB with `uv run project-kb-query ... --config kb/config.raw.yaml`, draft small Markdown notes under `docs/`, preserve structured `source_refs`, update Maps and Canvas, rebuild the curated index, then explain how to open Obsidian Graph View and `docs/01_Maps/Knowledge_Vault.canvas`.
 
-For raw visual evidence, run `uv run project-kb-curate-visual --config kb/config.raw.yaml` to export visual summary Markdown under `docs/_generated/visual_summaries/needs_review/`. Raw visual chunks are evidence intake, not curated knowledge, until reviewed Markdown summaries are indexed from `docs/`.
+For raw visual evidence, run `uv run project-kb-curate-visual --config kb/config.raw.yaml` to export visual summary Markdown under `docs/_generated/visual_summaries/needs_review/`. Raw visual chunks are evidence intake, not curated knowledge; generated `review_status: needs_review` notes are excluded from the default curated index until a human changes them to `review_status: reviewed` / `status: reviewed` or moves reviewed content into a formal `docs/` folder.
 
 Before generating or updating Obsidian notes, Maps, or Canvas labels, ask the user which language to use: `中文`, `English`, `日本語`, or follow the source language. If the user has not answered, pause note generation until the language is confirmed.
 

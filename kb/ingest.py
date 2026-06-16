@@ -243,20 +243,53 @@ def discover_files(cfg) -> list[Path]:
         for path in root.rglob("*"):
             if not path.is_file():
                 continue
-            if should_include(path, cfg.root_path, cfg.scan.include_patterns, cfg.scan.exclude_patterns):
+            if should_include(path, cfg.root_path, cfg.scan.include_patterns, cfg.scan.exclude_patterns, cfg=cfg):
                 files.append(path)
     return sorted(files)
 
 
-def should_include(path: Path, project_root: Path, include_patterns: list[str], exclude_patterns: list[str]) -> bool:
+def should_include(
+    path: Path,
+    project_root: Path,
+    include_patterns: list[str],
+    exclude_patterns: list[str],
+    cfg=None,
+) -> bool:
     rel = path.relative_to(project_root).as_posix()
     if path.name in DEFAULT_IGNORED_FILE_NAMES:
         return False
     if any(part in DEFAULT_EXCLUDED_DIR_NAMES for part in path.relative_to(project_root).parts):
         return False
     if any(fnmatch.fnmatch(rel, pattern) for pattern in exclude_patterns):
-        return False
+        if not _reviewed_generated_visual_summary(path, cfg):
+            return False
     return any(fnmatch.fnmatch(rel, pattern) for pattern in include_patterns)
+
+
+def _reviewed_generated_visual_summary(path: Path, cfg) -> bool:
+    if cfg is None or path.suffix.lower() != ".md":
+        return False
+    try:
+        rel = path.relative_to(cfg.root_path).as_posix()
+    except Exception:
+        return False
+    if "docs/_generated/" not in rel or "/needs_review/" not in rel:
+        return False
+    try:
+        import yaml
+
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if not text.startswith("---\n"):
+            return False
+        _, yaml_text, _ = text.split("---", 2)
+        data = yaml.safe_load(yaml_text) or {}
+        if data.get("kb_type") != "visual_summary":
+            return False
+        review_status = str(data.get("review_status") or data.get("status") or "").lower()
+        allowed = {str(value).lower() for value in getattr(cfg.curation, "index_review_statuses", ["reviewed", "approved"])}
+        return review_status in allowed
+    except Exception:
+        return False
 
 
 def file_sha256(path: Path) -> str:
