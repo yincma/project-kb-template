@@ -37,6 +37,37 @@ uv run project-kb-doctor --config kb/config.yaml
 
 Default MCP points to the curated index in `kb/config.yaml`. During raw source intake, use CLI queries against `kb/config.raw.yaml`; do not switch the default MCP unless you intentionally want raw-source retrieval in an AI session.
 
+## First-run Agent Behavior
+
+After installation, Codex or another agent may not see the `project-kb` MCP tools until the workspace/session is reloaded. The agent should check the current session before answering KB questions:
+
+1. Look for `kb_status` and `search_project_kb_fast` in the available tools.
+2. If MCP is available, call `kb_status` first and state: `Using MCP`.
+3. If `.codex/config.toml` exists but MCP tools are not available, state:
+
+```text
+当前会话尚未加载 project-kb MCP。请重新打开 Codex / 重新加载 workspace，或者确认 .codex/config.toml 位于当前 workspace 根目录。
+```
+
+4. If the user wants to continue immediately, use CLI only as an explicit fallback and state: `Using CLI fallback`.
+
+Task routing:
+
+- Maintenance tasks use CLI: install, doctor, diagnose, ingest, rebuild, and FTS rebuild.
+- Project Q&A uses MCP first: requirements, risks, meeting notes, historical decisions, owners, and milestones.
+- Raw intake and Obsidian curation use CLI raw-index queries first, then write curated notes under `docs/`, then rebuild the curated index.
+
+When the user says the raw index is already built, the agent should start curation instead of only explaining the process:
+
+1. Ask which language to use for generated notes, Maps, and Canvas labels: `中文`, `English`, `日本語`, or `follow source language`.
+2. Check raw index status with `uv run project-kb-doctor --config kb/config.raw.yaml`.
+3. Inventory files under `sources/`.
+4. Query raw KB with `uv run project-kb-query ... --config kb/config.raw.yaml`.
+5. Generate small Markdown notes under `docs/` with structured `source_refs`.
+6. Update Markdown Maps and `docs/01_Maps/Knowledge_Vault.canvas`.
+7. Rebuild curated index with `uv run project-kb-ingest --config kb/config.yaml --rebuild`.
+8. Tell the user how to open `docs/` in Obsidian and inspect Graph View / Canvas.
+
 ## Common Commands
 
 Raw index:
@@ -86,6 +117,8 @@ Recommended Obsidian usage:
 - Keep AI drafts as `status: needs_review`.
 - Move reviewed notes to `status: reviewed` only after human confirmation.
 - Use internal links such as `[[Client_A_Requirement_Matrix]]`.
+- Open `docs/01_Maps/Knowledge_Vault.canvas` for the visual vault overview.
+- Use Obsidian Graph View for link-level exploration after curated notes are generated.
 - Keep attachments in `docs/_attachments/`; this path is excluded from the curated index.
 - Use `docs/99_Inbox/` for temporary drafts; this path is excluded from the curated index.
 
@@ -101,6 +134,8 @@ Curator rules:
 - Every factual note must keep structured `source_refs`.
 - Unsupported statements belong under `Assumptions` or `Evidence Gaps`.
 - Generate small, linked Markdown notes rather than long reports.
+- Ask for the output language before generating notes, Maps, or Canvas labels.
+- Keep directory names stable; localize visible headings and body text according to the selected language.
 - Do not implement Proposal Agent or consulting Agent behavior in this layer.
 
 Structured `source_refs` format:

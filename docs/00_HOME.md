@@ -28,6 +28,11 @@ This `docs/` folder is both the Obsidian Vault and the curated Project KB source
 - [[01_Maps/Commercial_Risk]]
 - [[01_Maps/Proposal_Blocks]]
 
+## Visual Vault
+
+- Open [[01_Maps/Knowledge_Vault.canvas]] for the Canvas overview.
+- Use Obsidian Graph View to inspect note links after curated notes are generated.
+
 ## Working Areas
 
 - [[10_Clients/]]

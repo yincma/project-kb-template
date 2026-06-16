@@ -1,0 +1,162 @@
+{
+  "nodes": [
+    {
+      "id": "home",
+      "type": "file",
+      "file": "00_HOME.md",
+      "x": 0,
+      "y": 0,
+      "width": 360,
+      "height": 220
+    },
+    {
+      "id": "clients",
+      "type": "file",
+      "file": "01_Maps/Clients.md",
+      "x": -760,
+      "y": -320,
+      "width": 320,
+      "height": 180
+    },
+    {
+      "id": "requirements",
+      "type": "file",
+      "file": "01_Maps/Requirements.md",
+      "x": -760,
+      "y": -40,
+      "width": 320,
+      "height": 180
+    },
+    {
+      "id": "capabilities",
+      "type": "file",
+      "file": "01_Maps/Capabilities.md",
+      "x": -760,
+      "y": 240,
+      "width": 320,
+      "height": 180
+    },
+    {
+      "id": "case_studies",
+      "type": "file",
+      "file": "01_Maps/Case_Studies.md",
+      "x": 520,
+      "y": -320,
+      "width": 320,
+      "height": 180
+    },
+    {
+      "id": "delivery",
+      "type": "file",
+      "file": "01_Maps/Delivery.md",
+      "x": 520,
+      "y": -40,
+      "width": 320,
+      "height": 180
+    },
+    {
+      "id": "commercial_risk",
+      "type": "file",
+      "file": "01_Maps/Commercial_Risk.md",
+      "x": 520,
+      "y": 240,
+      "width": 320,
+      "height": 180
+    },
+    {
+      "id": "proposal_blocks",
+      "type": "file",
+      "file": "01_Maps/Proposal_Blocks.md",
+      "x": 0,
+      "y": 360,
+      "width": 360,
+      "height": 180
+    }
+  ],
+  "edges": [
+    {
+      "id": "home-clients",
+      "fromNode": "home",
+      "fromSide": "left",
+      "toNode": "clients",
+      "toSide": "right"
+    },
+    {
+      "id": "home-requirements",
+      "fromNode": "home",
+      "fromSide": "left",
+      "toNode": "requirements",
+      "toSide": "right"
+    },
+    {
+      "id": "home-capabilities",
+      "fromNode": "home",
+      "fromSide": "left",
+      "toNode": "capabilities",
+      "toSide": "right"
+    },
+    {
+      "id": "home-case-studies",
+      "fromNode": "home",
+      "fromSide": "right",
+      "toNode": "case_studies",
+      "toSide": "left"
+    },
+    {
+      "id": "home-delivery",
+      "fromNode": "home",
+      "fromSide": "right",
+      "toNode": "delivery",
+      "toSide": "left"
+    },
+    {
+      "id": "home-commercial-risk",
+      "fromNode": "home",
+      "fromSide": "right",
+      "toNode": "commercial_risk",
+      "toSide": "left"
+    },
+    {
+      "id": "requirements-capabilities",
+      "fromNode": "requirements",
+      "fromSide": "bottom",
+      "toNode": "capabilities",
+      "toSide": "top"
+    },
+    {
+      "id": "capabilities-case-studies",
+      "fromNode": "capabilities",
+      "fromSide": "right",
+      "toNode": "case_studies",
+      "toSide": "left"
+    },
+    {
+      "id": "delivery-commercial-risk",
+      "fromNode": "delivery",
+      "fromSide": "bottom",
+      "toNode": "commercial_risk",
+      "toSide": "top"
+    },
+    {
+      "id": "home-proposal-blocks",
+      "fromNode": "home",
+      "fromSide": "bottom",
+      "toNode": "proposal_blocks",
+      "toSide": "top"
+    },
+    {
+      "id": "case-studies-proposal-blocks",
+      "fromNode": "case_studies",
+      "fromSide": "bottom",
+      "toNode": "proposal_blocks",
+      "toSide": "right"
+    },
+    {
+      "id": "commercial-risk-proposal-blocks",
+      "fromNode": "commercial_risk",
+      "fromSide": "bottom",
+      "toNode": "proposal_blocks",
+      "toSide": "right"
+    }
+  ]
+}

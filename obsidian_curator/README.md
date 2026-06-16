@@ -20,6 +20,10 @@ This layer turns raw project materials into human-readable Obsidian notes that c
 6. Human reviewers move notes to `status: reviewed`.
 7. Rebuild the curated index from `docs/`.
 
+Before drafting notes, ask which language to use for visible note text, Maps, and Canvas labels: `中文`, `English`, `日本語`, or follow the source language.
+
+When the raw index is already complete, run the curation flow directly: check raw index status, inventory `sources/`, query the raw KB, draft small notes under `docs/`, update Markdown Maps and `docs/01_Maps/Knowledge_Vault.canvas`, rebuild the curated index, and tell the user how to inspect Graph View and Canvas in Obsidian.
+
 ## Raw Source Categories
 
 - `sources/10_client_inputs/`: RFPs, emails, meeting notes, client decks.
@@ -41,3 +45,5 @@ This layer turns raw project materials into human-readable Obsidian notes that c
 - `docs/90_Proposal_Blocks/`
 
 Use `docs/99_Inbox/` only for temporary drafts. It is excluded from the curated index.
+
+Use `docs/01_Maps/Knowledge_Vault.canvas` as the visual vault overview. It is an Obsidian Canvas file and is not part of the curated text index.

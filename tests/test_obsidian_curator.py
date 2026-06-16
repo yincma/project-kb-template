@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import yaml
@@ -59,6 +60,7 @@ def test_obsidian_curator_structure_exists():
         assert (ROOT / rel_path).is_dir()
 
     assert (ROOT / "docs" / "00_HOME.md").is_file()
+    assert (ROOT / "docs" / "01_Maps" / "Knowledge_Vault.canvas").is_file()
     assert (ROOT / "obsidian_curator" / "README.md").is_file()
     assert (ROOT / "obsidian_curator" / "SKILL.md").is_file()
     assert len(list((ROOT / "obsidian_curator" / "prompts").glob("*.md"))) == 9
@@ -110,6 +112,7 @@ def test_curated_config_targets_docs_and_excludes_non_curated_paths(tmp_path: Pa
     _write(tmp_path / "docs" / "_templates" / "template.md", "# Template\n")
     _write(tmp_path / "docs" / "99_Inbox" / "draft.md", "# Draft\n")
     _write(tmp_path / "docs" / "_attachments" / "asset.md", "# Asset\n")
+    _write(tmp_path / "docs" / "01_Maps" / "Knowledge_Vault.canvas", "{}\n")
 
     cfg = ProjectKBConfig(project_root=str(tmp_path))
     cfg.scan.source_dirs = scan["source_dirs"]
@@ -119,6 +122,58 @@ def test_curated_config_targets_docs_and_excludes_non_curated_paths(tmp_path: Pa
     assert [path.relative_to(tmp_path).as_posix() for path in discover_files(cfg)] == [
         "docs/10_Clients/client.md"
     ]
+
+
+def test_visual_vault_canvas_is_valid_and_references_core_maps():
+    canvas = json.loads((ROOT / "docs" / "01_Maps" / "Knowledge_Vault.canvas").read_text(encoding="utf-8"))
+    files = {node.get("file") for node in canvas["nodes"] if node.get("type") == "file"}
+
+    assert {
+        "00_HOME.md",
+        "01_Maps/Clients.md",
+        "01_Maps/Requirements.md",
+        "01_Maps/Capabilities.md",
+        "01_Maps/Case_Studies.md",
+        "01_Maps/Delivery.md",
+        "01_Maps/Commercial_Risk.md",
+        "01_Maps/Proposal_Blocks.md",
+    }.issubset(files)
+    assert canvas["edges"]
+
+
+def test_first_run_agent_guidance_is_documented():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    kiro = (ROOT / ".kiro" / "steering" / "project-kb.md").read_text(encoding="utf-8")
+    required = [
+        "当前会话尚未加载 project-kb MCP",
+        "search_project_kb_fast",
+        "CLI fallback",
+        "Maintenance tasks use CLI",
+        "uv run project-kb-query ... --config kb/config.raw.yaml",
+    ]
+
+    assert "First-run Agent Behavior" in readme
+    assert "Using MCP" in readme
+    for text in (agents, kiro):
+        for phrase in required:
+            assert phrase in text
+
+
+def test_curator_workflow_requires_language_and_canvas_updates():
+    skill = (ROOT / "obsidian_curator" / "SKILL.md").read_text(encoding="utf-8")
+    prompt = (ROOT / "obsidian_curator" / "prompts" / "build_moc.md").read_text(encoding="utf-8")
+    system_prompt = (ROOT / "obsidian_curator" / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
+
+    for text in (skill, prompt, system_prompt):
+        assert "中文" in text
+        assert "English" in text
+        assert "日本語" in text
+        assert "Knowledge_Vault.canvas" in text
+
+    assert "Raw Index Completed To Curated Vault" in skill
+    assert "uv run project-kb-doctor --config kb/config.raw.yaml" in skill
+    assert "uv run project-kb-ingest --config kb/config.yaml --rebuild" in skill
 
 
 def test_gitignore_excludes_raw_index_cache():
