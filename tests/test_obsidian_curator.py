@@ -29,7 +29,9 @@ DOC_DIRS = [
     "docs/70_Commercial_Risk",
     "docs/90_Proposal_Blocks",
     "docs/99_Inbox",
+    "docs/_generated/visual_summaries/needs_review",
     "docs/_attachments",
+    "docs/_attachments/kb_assets",
     "docs/_templates",
 ]
 
@@ -85,10 +87,17 @@ def test_raw_config_targets_sources_and_raw_cache():
     assert cfg.database.table_name == "project_kb_raw"
     assert cfg.database.manifest_path == ".lancedb_raw/manifest.json"
     assert cfg.database.extracted_cache_dir == ".kb_cache_raw/extracted"
+    assert cfg.database.multimodal_cache_dir == ".kb_cache_raw/multimodal"
+    assert cfg.database.index_role == "raw"
     assert cfg.scan.source_dirs == ["sources"]
     assert "sources/**/*.pdf" in cfg.scan.include_patterns
     assert "sources/**/*.yml" in cfg.scan.include_patterns
+    assert "sources/**/*.png" in cfg.scan.include_patterns
+    assert "sources/**/*.webp" in cfg.scan.include_patterns
     assert "**/*" not in cfg.scan.include_patterns
+    assert cfg.parsing.multimodal.enabled is True
+    assert cfg.parsing.multimodal.pdf.render_pages == "auto"
+    assert cfg.parsing.multimodal.vision.allow_external_vision is False
     assert cfg.db_path == ROOT / ".lancedb_raw"
     assert cfg.extracted_cache_dir == ROOT / ".kb_cache_raw" / "extracted"
 
@@ -98,6 +107,8 @@ def test_curated_config_targets_docs_and_excludes_non_curated_paths(tmp_path: Pa
     scan = data["scan"]
 
     assert scan["source_dirs"] == ["docs"]
+    assert data["database"]["index_role"] == "curated"
+    assert data["parsing"]["multimodal"]["enabled"] is False
     assert scan["include_patterns"] == ["**/*.md", "**/*.csv", "**/*.yaml", "**/*.yml"]
     for pattern in (
         "docs/.obsidian/**",

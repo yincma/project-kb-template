@@ -5,6 +5,7 @@ from typing import Any
 
 from kb.parsers.ocr import OCRProcessor
 from kb.parsers.registry import ParsedDocument, ParsedSection
+from kb.multimodal.extraction import new_visual_stats, register_visual_bytes
 
 
 def parse_docx_file(path: Path, config: Any | None = None) -> ParsedDocument:
@@ -25,6 +26,7 @@ def parse_docx_file(path: Path, config: Any | None = None) -> ParsedDocument:
         return ParsedDocument(path=path, warnings=[f"Failed to parse {path}: {exc}"])
 
     sections: list[ParsedSection] = []
+    visual_stats = new_visual_stats()
     current_heading: str | None = None
     current_parts: list[str] = []
 
@@ -73,6 +75,32 @@ def parse_docx_file(path: Path, config: Any | None = None) -> ParsedDocument:
             except Exception as exc:
                 warnings.append(f"OCR failed for {path} image {rel_id}: {exc}")
 
+    if _multimodal_enabled(config):
+        image_counter = 0
+        context_text = "\n".join(current_parts)[-2000:]
+        for rel_id, part in document.part.related_parts.items():
+            content_type = getattr(part, "content_type", "")
+            if not content_type.startswith("image/"):
+                continue
+            image_counter += 1
+            try:
+                ext = "." + content_type.split("/", 1)[1].replace("jpeg", "jpg")
+                section = register_visual_bytes(
+                    image_bytes=part.blob,
+                    source_path=path,
+                    config=config,
+                    generated_from="embedded_image",
+                    occurrence_index=image_counter,
+                    context_title=current_heading,
+                    nearby_text=context_text,
+                    ext=ext,
+                    stats=visual_stats,
+                )
+                if section:
+                    sections.append(section)
+            except Exception as exc:
+                warnings.append(f"Multimodal image extraction failed for {path} image {rel_id}: {exc}")
+
     flush()
 
     if any("Image OCR" in section.text for section in sections):
@@ -81,6 +109,8 @@ def parse_docx_file(path: Path, config: Any | None = None) -> ParsedDocument:
                 section.ocr_used = True
                 section.extraction_method = "text+ocr"
 
+    warnings.extend(str(warning) for warning in visual_stats.get("warnings", []))
+    warnings.extend(str(warning) for warning in visual_stats.get("limit_warnings", []))
     return ParsedDocument(path=path, sections=sections, warnings=warnings)
 
 
@@ -99,6 +129,10 @@ def _ocr_config(config: Any | None) -> Any | None:
 
 def _office_config(config: Any | None) -> Any | None:
     return _cfg_value(_cfg_value(config, "parsing", None), "office", None)
+
+
+def _multimodal_enabled(config: Any | None) -> bool:
+    return bool(_cfg_value(_cfg_value(_cfg_value(config, "parsing", None), "multimodal", None), "enabled", False))
 
 
 def _cfg_value(config: Any | None, name: str, default: Any = None) -> Any:

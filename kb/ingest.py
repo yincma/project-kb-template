@@ -20,6 +20,7 @@ if __package__ is None or __package__ == "":
 from kb.chunking import chunk_parsed_document
 from kb.embeddings import BGEEmbedder
 from kb.parsers import parse_file
+from kb.multimodal.manifest import MultimodalManifest
 from kb.store import (
     STORE_SCHEMA_VERSION,
     LanceDBStore,
@@ -83,26 +84,30 @@ def index_project(
 
     if store.table_exists() and store.detect_schema_version() < STORE_SCHEMA_VERSION:
         raise RuntimeError(
-            "Existing LanceDB table uses the v1 schema. Run "
+            "Existing LanceDB table uses an older schema. Run "
             "`uv run project-kb-ingest --config kb/config.yaml --rebuild` "
-            "to rebuild the local index with the v2 schema."
+            "to rebuild the local index with the v3 schema."
         )
 
     manifest = {"version": STORE_SCHEMA_VERSION, "files": {}} if rebuild else load_manifest(cfg)
     if int(manifest.get("version", 1)) < STORE_SCHEMA_VERSION and manifest.get("files"):
         raise RuntimeError(
-            "Existing manifest uses the v1 schema. Run "
+            "Existing manifest uses an older schema. Run "
             "`uv run project-kb-ingest --config kb/config.yaml --rebuild` "
-            "to rebuild the local index with the v2 manifest."
+            "to rebuild the local index with the v3 manifest."
         )
     manifest["version"] = STORE_SCHEMA_VERSION
     store.open_or_create_table()
     files = discover_files(cfg)
+    stale_summary = None
+    if cfg.parsing.multimodal.enabled:
+        stale_summary = MultimodalManifest(cfg).mark_stale_missing_sources()
 
     indexed_files = 0
     skipped_files = 0
     warning_count = 0
     chunk_count = 0
+    visual_chunk_count = 0
     embedder = None
 
     if not files:
@@ -142,6 +147,7 @@ def index_project(
         if not chunks:
             skipped_files += 1
             continue
+        visual_chunks = [chunk for chunk in chunks if _metadata_value(chunk, "asset_type") == "visual"]
 
         if embedder is None:
             embedder = build_embedder(cfg)
@@ -171,21 +177,36 @@ def index_project(
         }
         indexed_files += 1
         chunk_count += len(rows)
+        visual_chunk_count += len(visual_chunks)
 
     fts_warning = store.ensure_fts_index(replace=bool(rebuild or rebuild_fts))
     if fts_warning:
         warning_count += 1
         console.print(f"[yellow]{fts_warning}[/yellow]")
     save_manifest(cfg, manifest)
+    if cfg.parsing.multimodal.enabled:
+        MultimodalManifest(cfg).append_ingest_run(
+            {
+                "config_path": str(config_path or ""),
+                "rebuild": bool(rebuild),
+                "indexed_files": indexed_files,
+                "chunks": chunk_count,
+                "searchable_visual_chunks": visual_chunk_count,
+                "stale_summary": stale_summary,
+                "warnings": warning_count,
+            }
+        )
 
     elapsed = time.perf_counter() - started
     console.print(
         f"[green]Done.[/green] indexed_files={indexed_files} chunks={chunk_count} "
-        f"skipped_files={skipped_files} warnings={warning_count} elapsed={elapsed:.1f}s"
+        f"visual_chunks={visual_chunk_count} skipped_files={skipped_files} "
+        f"warnings={warning_count} elapsed={elapsed:.1f}s"
     )
     return {
         "indexed_files": indexed_files,
         "chunks": chunk_count,
+        "visual_chunks": visual_chunk_count,
         "skipped_files": skipped_files,
         "warnings": warning_count,
         "elapsed": elapsed,
@@ -271,7 +292,8 @@ def row_for_chunk(
     indexed_at: str,
 ) -> dict[str, Any]:
     metadata = {
-        "source_path": source_path,
+        "indexed_source_path": source_path,
+        "source_path": _metadata_value(chunk, "source_path", source_path),
         "file_name": file_path.name,
         "file_ext": file_path.suffix.lower(),
         "heading": chunk.heading,
@@ -290,16 +312,29 @@ def row_for_chunk(
         "ocr_confidence": _metadata_value(chunk, "ocr_confidence"),
         "extraction_method": _metadata_value(chunk, "extraction_method", "text"),
         "asset_type": _metadata_value(chunk, "asset_type", "document"),
+        "asset_id": _metadata_value(chunk, "asset_id"),
+        "occurrence_id": _metadata_value(chunk, "occurrence_id"),
+        "attachment_path": _metadata_value(chunk, "attachment_path"),
+        "visual_type": _metadata_value(chunk, "visual_type"),
+        "image_hash": _metadata_value(chunk, "image_hash"),
+        "caption_provider": _metadata_value(chunk, "caption_provider"),
+        "caption_model": _metadata_value(chunk, "caption_model"),
+        "prompt_version": _metadata_value(chunk, "prompt_version"),
+        "searchable": _metadata_value(chunk, "searchable", True),
+        "confidence": _metadata_value(chunk, "confidence"),
         "section_index": _metadata_value(chunk, "section_index"),
         "sha256": sha256,
         "modified_time": modified_time,
         "indexed_at": indexed_at,
     }
+    for key, value in (getattr(chunk, "metadata", None) or {}).items():
+        metadata.setdefault(key, value)
     return {
         "id": metadata["chunk_id"],
         "text": chunk.text,
         "vector": vector,
-        "source_path": source_path,
+        "indexed_source_path": source_path,
+        "source_path": metadata["source_path"],
         "file_name": file_path.name,
         "heading": chunk.heading or "",
         "chunk_index": chunk.chunk_index,
@@ -314,6 +349,16 @@ def row_for_chunk(
         "ocr_confidence": metadata["ocr_confidence"],
         "extraction_method": metadata["extraction_method"] or "",
         "asset_type": metadata["asset_type"] or "",
+        "asset_id": metadata["asset_id"] or "",
+        "occurrence_id": metadata["occurrence_id"] or "",
+        "attachment_path": metadata["attachment_path"] or "",
+        "visual_type": metadata["visual_type"] or "",
+        "image_hash": metadata["image_hash"] or "",
+        "caption_provider": metadata["caption_provider"] or "",
+        "caption_model": metadata["caption_model"] or "",
+        "prompt_version": metadata["prompt_version"] or "",
+        "searchable": bool(metadata["searchable"]),
+        "confidence": metadata["confidence"],
         "sha256": sha256,
         "modified_time": modified_time,
         "indexed_at": indexed_at,

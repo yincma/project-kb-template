@@ -5,6 +5,7 @@ from typing import Any
 
 from kb.parsers.ocr import OCRProcessor
 from kb.parsers.registry import ParsedDocument, ParsedSection
+from kb.multimodal.extraction import new_visual_stats, register_visual_bytes
 
 
 def parse_pptx_file(path: Path, config: Any | None = None) -> ParsedDocument:
@@ -27,9 +28,11 @@ def parse_pptx_file(path: Path, config: Any | None = None) -> ParsedDocument:
         return ParsedDocument(path=path, warnings=[f"Failed to parse {path}: {exc}"])
 
     sections: list[ParsedSection] = []
+    visual_stats = new_visual_stats()
     for slide_index, slide in enumerate(deck.slides, start=1):
         parts: list[str] = []
         title = _slide_title(slide)
+        image_counter = 0
         if title:
             parts.append(title)
 
@@ -51,6 +54,26 @@ def parse_pptx_file(path: Path, config: Any | None = None) -> ParsedDocument:
                 except Exception as exc:
                     warnings.append(f"OCR failed for {path} slide {slide_index}: {exc}")
 
+            if _multimodal_enabled(config) and getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE:
+                try:
+                    image_counter += 1
+                    section = register_visual_bytes(
+                        image_bytes=shape.image.blob,
+                        source_path=path,
+                        config=config,
+                        generated_from="embedded_image",
+                        occurrence_index=image_counter,
+                        slide_number=slide_index,
+                        context_title=title or f"Slide {slide_index}",
+                        nearby_text="\n".join(parts)[:2000],
+                        ext=f".{shape.image.ext}",
+                        stats=visual_stats,
+                    )
+                    if section:
+                        sections.append(section)
+                except Exception as exc:
+                    warnings.append(f"Multimodal image extraction failed for {path} slide {slide_index}: {exc}")
+
         if extract_notes:
             notes = _notes_text(slide)
             if notes:
@@ -71,6 +94,8 @@ def parse_pptx_file(path: Path, config: Any | None = None) -> ParsedDocument:
                 )
             )
 
+    warnings.extend(str(warning) for warning in visual_stats.get("warnings", []))
+    warnings.extend(str(warning) for warning in visual_stats.get("limit_warnings", []))
     return ParsedDocument(path=path, sections=sections, warnings=warnings)
 
 
@@ -106,6 +131,10 @@ def _ocr_config(config: Any | None) -> Any | None:
 
 def _office_config(config: Any | None) -> Any | None:
     return _cfg_value(_cfg_value(config, "parsing", None), "office", None)
+
+
+def _multimodal_enabled(config: Any | None) -> bool:
+    return bool(_cfg_value(_cfg_value(_cfg_value(config, "parsing", None), "multimodal", None), "enabled", False))
 
 
 def _cfg_value(config: Any | None, name: str, default: Any = None) -> Any:

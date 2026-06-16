@@ -38,11 +38,12 @@ Use this workflow when the user says the raw index is complete or asks to turn r
 3. Inventory files under `sources/` and group them by source category.
 4. Query raw KB with `uv run project-kb-query ... --config kb/config.raw.yaml`.
 5. Build an Evidence Table before drafting any note.
-6. Generate small Markdown notes under the right `docs/` area with `status: needs_review`.
-7. Preserve structured `source_refs` for every factual claim.
-8. Update Markdown Maps and `docs/01_Maps/Knowledge_Vault.canvas`.
-9. Rebuild the curated index with `uv run project-kb-ingest --config kb/config.yaml --rebuild`.
-10. Tell the user how to open `docs/` in Obsidian, inspect Graph View, and open the Canvas.
+6. For visual evidence, run `uv run project-kb-curate-visual --config kb/config.raw.yaml` or generate equivalent visual summary Markdown under `docs/_generated/visual_summaries/needs_review/`.
+7. Generate small Markdown notes under the right `docs/` area with `status: needs_review`.
+8. Preserve structured `source_refs` for every factual claim.
+9. Update Markdown Maps and `docs/01_Maps/Knowledge_Vault.canvas`.
+10. Rebuild the curated index with `uv run project-kb-ingest --config kb/config.yaml --rebuild`.
+11. Tell the user how to open `docs/` in Obsidian, inspect Graph View, and open the Canvas.
 
 ## Workflow 3: Obsidian Note Generation
 

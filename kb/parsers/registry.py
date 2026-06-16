@@ -22,7 +22,8 @@ TEXT_EXTENSIONS = {
 }
 
 OFFICE_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
-SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | OFFICE_EXTENSIONS
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | OFFICE_EXTENSIONS | IMAGE_EXTENSIONS
 
 
 @dataclass
@@ -95,7 +96,7 @@ def parse_file(path: str | Path, config: Any | None = None) -> ParsedDocument | 
     if ext in TEXT_EXTENSIONS:
         from kb.parsers.text import parse_text_file
 
-        return parse_text_file(path)
+        return parse_text_file(path, config=config)
 
     if ext == ".pdf":
         from kb.parsers.pdf import parse_pdf_file
@@ -116,5 +117,10 @@ def parse_file(path: str | Path, config: Any | None = None) -> ParsedDocument | 
         from kb.parsers.docx import parse_docx_file
 
         return parse_docx_file(path, config=config)
+
+    if ext in IMAGE_EXTENSIONS:
+        from kb.parsers.image import parse_image_file
+
+        return parse_image_file(path, config=config)
 
     return ParsedDocument(path=path, warnings=[f"Skipped unsupported file type: {path}"])

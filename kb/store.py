@@ -28,7 +28,7 @@ DEFAULT_EXCLUDES = [
     "**/desktop.ini",
 ]
 
-STORE_SCHEMA_VERSION = 2
+STORE_SCHEMA_VERSION = 3
 V2_METADATA_COLUMNS = [
     "source_path",
     "heading",
@@ -40,6 +40,19 @@ V2_METADATA_COLUMNS = [
     "ocr_used",
     "metadata_json",
 ]
+V3_VISUAL_COLUMNS = [
+    "indexed_source_path",
+    "asset_id",
+    "occurrence_id",
+    "attachment_path",
+    "visual_type",
+    "image_hash",
+    "caption_provider",
+    "caption_model",
+    "prompt_version",
+    "searchable",
+    "confidence",
+]
 
 
 class DatabaseConfig(BaseModel):
@@ -48,6 +61,8 @@ class DatabaseConfig(BaseModel):
     manifest_path: str = ".lancedb/manifest.json"
     vector_dimension: int = 1024
     extracted_cache_dir: str = ".kb_cache/extracted"
+    multimodal_cache_dir: str = ".kb_cache/multimodal"
+    index_role: Literal["raw", "curated"] = "curated"
 
 
 class ScanConfig(BaseModel):
@@ -84,9 +99,57 @@ class OfficeParsingConfig(BaseModel):
     xlsx_rows_per_section: int = 500
 
 
+class MultimodalPDFConfig(BaseModel):
+    extract_embedded_images: bool = True
+    render_pages: Literal["off", "auto", "all", "keyword_only"] = "off"
+    render_all_pages: bool | None = None
+    render_dpi: int = 180
+    max_rendered_pages_per_file: int = 30
+    max_visual_assets_per_file: int = 200
+    min_page_text_chars: int = 80
+    min_drawing_count_for_render: int = 8
+    min_image_area_ratio_for_render: float = 0.25
+
+
+class MultimodalImagesConfig(BaseModel):
+    min_image_width: int = 256
+    min_image_height: int = 256
+    skip_small_icons: bool = True
+    skip_near_blank_images: bool = True
+    skip_logo_like_images: bool = True
+    max_image_pixels: int = 16_000_000
+    deduplicate_by_hash: bool = True
+
+
+class MultimodalVisionConfig(BaseModel):
+    enabled: bool = False
+    provider: Literal["stub", "ocr_only", "local", "local_vision", "openai_compatible", "azure", "gemini", "cloud_vision"] = "ocr_only"
+    model: str | None = None
+    allow_external_vision: bool = False
+    cache_by_hash: bool = True
+    prompt_version: str = "vision-caption-v1"
+    max_caption_chars: int = 4000
+    max_ocr_chars: int = 4000
+
+
+class CuratedAttachmentsConfig(BaseModel):
+    mode: Literal["off", "referenced_only"] = "off"
+    allowed_roots: list[str] = Field(default_factory=lambda: ["docs/_attachments/kb_assets"])
+
+
+class MultimodalParsingConfig(BaseModel):
+    enabled: bool = False
+    attachments_dir: str = "docs/_attachments/kb_assets"
+    pdf: MultimodalPDFConfig = Field(default_factory=MultimodalPDFConfig)
+    images: MultimodalImagesConfig = Field(default_factory=MultimodalImagesConfig)
+    vision: MultimodalVisionConfig = Field(default_factory=MultimodalVisionConfig)
+    curated_attachments: CuratedAttachmentsConfig = Field(default_factory=CuratedAttachmentsConfig)
+
+
 class ParsingConfig(BaseModel):
     ocr: OCRConfig = Field(default_factory=OCRConfig)
     office: OfficeParsingConfig = Field(default_factory=OfficeParsingConfig)
+    multimodal: MultimodalParsingConfig = Field(default_factory=MultimodalParsingConfig)
 
 
 class BoostRule(BaseModel):
@@ -198,6 +261,16 @@ class ProjectKBConfig(BaseModel):
         path = Path(self.database.extracted_cache_dir)
         return path if path.is_absolute() else self.root_path / path
 
+    @property
+    def multimodal_cache_dir(self) -> Path:
+        path = Path(self.database.multimodal_cache_dir)
+        return path if path.is_absolute() else self.root_path / path
+
+    @property
+    def multimodal_attachments_dir(self) -> Path:
+        path = Path(self.parsing.multimodal.attachments_dir)
+        return path if path.is_absolute() else self.root_path / path
+
 
 def load_config(config_path: str | Path | None = None) -> ProjectKBConfig:
     if config_path is None:
@@ -286,6 +359,7 @@ class LanceDBStore:
                 pa.field("id", pa.string()),
                 pa.field("text", pa.string()),
                 pa.field("vector", pa.list_(pa.float32(), self.config.database.vector_dimension)),
+                pa.field("indexed_source_path", pa.string()),
                 pa.field("source_path", pa.string()),
                 pa.field("file_name", pa.string()),
                 pa.field("heading", pa.string()),
@@ -301,6 +375,16 @@ class LanceDBStore:
                 pa.field("ocr_confidence", pa.float64()),
                 pa.field("extraction_method", pa.string()),
                 pa.field("asset_type", pa.string()),
+                pa.field("asset_id", pa.string()),
+                pa.field("occurrence_id", pa.string()),
+                pa.field("attachment_path", pa.string()),
+                pa.field("visual_type", pa.string()),
+                pa.field("image_hash", pa.string()),
+                pa.field("caption_provider", pa.string()),
+                pa.field("caption_model", pa.string()),
+                pa.field("prompt_version", pa.string()),
+                pa.field("searchable", pa.bool_()),
+                pa.field("confidence", pa.float64()),
                 pa.field("sha256", pa.string()),
                 pa.field("modified_time", pa.float64()),
                 pa.field("indexed_at", pa.string()),
@@ -313,6 +397,8 @@ class LanceDBStore:
         if not self.table_exists():
             return STORE_SCHEMA_VERSION
         field_names = self.schema_field_names()
+        if set(V3_VISUAL_COLUMNS).issubset(field_names):
+            return 3
         if {"parser_name", "source_format", "ocr_used"}.issubset(field_names):
             return 2
         return 1
@@ -352,7 +438,10 @@ class LanceDBStore:
         if not source_paths or not self.table_exists():
             return
         quoted = ", ".join(_sql_quote(path) for path in source_paths)
-        self.open_table().delete(f"source_path IN ({quoted})")
+        if "indexed_source_path" in self.schema_field_names():
+            self.open_table().delete(f"source_path IN ({quoted}) OR indexed_source_path IN ({quoted})")
+        else:
+            self.open_table().delete(f"source_path IN ({quoted})")
 
     def ensure_fts_index(self, *, replace: bool = False) -> str | None:
         try:
@@ -403,9 +492,10 @@ class LanceDBStore:
     def metadata_summary(self, sample_limit: int = 200) -> dict[str, Any]:
         field_names = self.schema_field_names()
         rows = self.preview_rows(sample_limit)
+        required_columns = V2_METADATA_COLUMNS + V3_VISUAL_COLUMNS
         return {
-            "required_columns": V2_METADATA_COLUMNS,
-            "missing_columns": [column for column in V2_METADATA_COLUMNS if column not in field_names],
+            "required_columns": required_columns,
+            "missing_columns": [column for column in required_columns if column not in field_names],
             "sampled_rows": len(rows),
             "source_formats": sorted({str(row.get("source_format")) for row in rows if row.get("source_format")}),
             "parser_names": sorted({str(row.get("parser_name")) for row in rows if row.get("parser_name")}),
@@ -414,6 +504,10 @@ class LanceDBStore:
                 for field in ("page_number", "slide_number", "sheet_name", "cell_range")
             },
             "ocr_used_rows": sum(1 for row in rows if bool(row.get("ocr_used"))),
+            "visual_rows": sum(1 for row in rows if row.get("asset_type") == "visual"),
+            "searchable_visual_rows": sum(
+                1 for row in rows if row.get("asset_type") == "visual" and row.get("searchable") is not False
+            ),
         }
 
 

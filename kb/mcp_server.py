@@ -20,7 +20,7 @@ from kb.store import LanceDBStore, extracted_cache_path, load_config
 
 mcp = FastMCP("project-kb")
 _RUNTIME_CACHE: dict[tuple[str | None, str | None, str | None], tuple[Any, Any, Any]] = {}
-BINARY_SOURCE_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
+BINARY_SOURCE_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx", ".png", ".jpg", ".jpeg", ".webp"}
 
 
 def _load_runtime():
@@ -58,6 +58,7 @@ def kb_status() -> dict[str, Any]:
         "project_root": str(cfg.root_path),
         "db_path": str(cfg.db_path),
         "table_name": cfg.database.table_name,
+        "index_role": cfg.database.index_role,
         "table_exists": store.table_exists(),
         "schema_version": store.detect_schema_version() if store.table_exists() else None,
         "row_count": store.count_rows(),
@@ -75,6 +76,13 @@ def kb_status() -> dict[str, Any]:
         "ocr_enabled": cfg.parsing.ocr.enabled,
         "ocr_engine": cfg.parsing.ocr.engine,
         "ocr_available": ocr_status["available"],
+        "multimodal_enabled": cfg.parsing.multimodal.enabled,
+        "multimodal_attachments_dir": cfg.parsing.multimodal.attachments_dir,
+        "external_vision_enabled": bool(
+            cfg.parsing.multimodal.vision.allow_external_vision
+            and cfg.parsing.multimodal.vision.provider
+            in {"openai_compatible", "azure", "gemini", "cloud_vision"}
+        ),
         "supported_formats": sorted(SUPPORTED_EXTENSIONS),
     }
 
@@ -181,7 +189,24 @@ def _citation_for_result(result: dict[str, Any]) -> dict[str, Any]:
 def _compact_metadata(result: dict[str, Any]) -> dict[str, Any]:
     return {
         key: result.get(key)
-        for key in ("page_number", "slide_number", "sheet_name", "row_range", "cell_range", "ocr_used")
+        for key in (
+            "indexed_source_path",
+            "asset_type",
+            "visual_type",
+            "attachment_path",
+            "image_hash",
+            "caption_provider",
+            "caption_model",
+            "prompt_version",
+            "confidence",
+            "searchable",
+            "page_number",
+            "slide_number",
+            "sheet_name",
+            "row_range",
+            "cell_range",
+            "ocr_used",
+        )
         if result.get(key) not in (None, "")
     }
 

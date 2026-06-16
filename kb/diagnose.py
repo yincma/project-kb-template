@@ -16,6 +16,7 @@ if __package__ is None or __package__ == "":
 from kb.parsers import SUPPORTED_EXTENSIONS
 from kb.parsers.ocr import ocr_dependency_status
 from kb.retrieval import reranker_dependency_status
+from kb.multimodal.manifest import MultimodalManifest
 from kb.store import STORE_SCHEMA_VERSION, LanceDBStore, load_config
 
 
@@ -67,13 +68,21 @@ def diagnose_project(config_path: str | Path | None = None, *, deep_reranker_che
     warnings: list[str] = []
     warnings.extend(_path_warnings(cfg))
     if schema_version is not None and schema_version < STORE_SCHEMA_VERSION:
-        warnings.append("LanceDB table uses the v1 schema; rebuild is required for v2 indexing.")
+        warnings.append(
+            f"LanceDB table uses schema v{schema_version}; rebuild is required for v{STORE_SCHEMA_VERSION} indexing."
+        )
     if metadata_summary and metadata_summary["missing_columns"]:
-        warnings.append(f"V2 metadata columns are missing: {', '.join(metadata_summary['missing_columns'])}")
+        warnings.append(f"Expected schema columns are missing: {', '.join(metadata_summary['missing_columns'])}")
     if cfg.parsing.ocr.enabled and not ocr_status["available"]:
         warnings.append("OCR is enabled but no local OCR dependency is importable.")
     if cfg.retrieval.high_precision and not reranker_status["available"]:
         warnings.append(f"High precision reranker is enabled but not fully available: {reranker_status['error']}")
+    if cfg.parsing.multimodal.pdf.render_all_pages is not None:
+        warnings.append("parsing.multimodal.pdf.render_all_pages is deprecated; render_pages is authoritative.")
+    if _external_vision_enabled(cfg):
+        warnings.append("External vision provider is enabled; images may leave this machine.")
+
+    multimodal_manifest = MultimodalManifest(cfg).summary()
 
     return {
         "config_path": str(getattr(cfg, "_config_path", "") or ""),
@@ -82,9 +91,11 @@ def diagnose_project(config_path: str | Path | None = None, *, deep_reranker_che
         "project_root": str(cfg.root_path),
         "db_path": str(cfg.db_path),
         "table_name": cfg.database.table_name,
+        "index_role": cfg.database.index_role,
         "table_exists": table_exists,
         "schema_version": schema_version,
         "expected_schema_version": STORE_SCHEMA_VERSION,
+        "needs_rebuild": bool(schema_version is not None and schema_version < STORE_SCHEMA_VERSION),
         "row_count": store.count_rows() if table_exists else 0,
         "metadata_summary": metadata_summary,
         "supported_formats": sorted(SUPPORTED_EXTENSIONS),
@@ -93,6 +104,17 @@ def diagnose_project(config_path: str | Path | None = None, *, deep_reranker_che
             "enabled": cfg.parsing.ocr.enabled,
             "engine": cfg.parsing.ocr.engine,
             **ocr_status,
+        },
+        "multimodal": {
+            "enabled": cfg.parsing.multimodal.enabled,
+            "attachments_dir": cfg.parsing.multimodal.attachments_dir,
+            "cache_dir": str(cfg.multimodal_cache_dir),
+            "render_pages": cfg.parsing.multimodal.pdf.render_pages,
+            "vision_provider": cfg.parsing.multimodal.vision.provider,
+            "allow_external_vision": cfg.parsing.multimodal.vision.allow_external_vision,
+            "external_vision_enabled": _external_vision_enabled(cfg),
+            "curated_attachments_mode": cfg.parsing.multimodal.curated_attachments.mode,
+            "manifest": multimodal_manifest,
         },
         "reranker": {
             "enabled": cfg.retrieval.high_precision,
@@ -116,9 +138,11 @@ def print_diagnostics(payload: dict[str, Any]) -> None:
         "project_root",
         "db_path",
         "table_name",
+        "index_role",
         "table_exists",
         "schema_version",
         "expected_schema_version",
+        "needs_rebuild",
         "row_count",
     ):
         summary.add_row(key, str(payload.get(key)))
@@ -136,6 +160,14 @@ def print_diagnostics(payload: dict[str, Any]) -> None:
     feature.add_column("Feature")
     feature.add_column("Status")
     feature.add_row("OCR", f"enabled={payload['ocr']['enabled']} available={payload['ocr']['available']}")
+    multimodal = payload["multimodal"]
+    feature.add_row(
+        "Multimodal",
+        (
+            f"enabled={multimodal['enabled']} render_pages={multimodal['render_pages']} "
+            f"provider={multimodal['vision_provider']} external={multimodal['external_vision_enabled']}"
+        ),
+    )
     feature.add_row(
         "High precision reranker",
         (
@@ -158,7 +190,16 @@ def print_diagnostics(payload: dict[str, Any]) -> None:
         metadata_table.add_row("parser_names", ", ".join(metadata["parser_names"]) or "none")
         metadata_table.add_row("location_fields_with_values", json.dumps(metadata["location_fields_with_values"], ensure_ascii=False))
         metadata_table.add_row("ocr_used_rows", str(metadata["ocr_used_rows"]))
+        metadata_table.add_row("visual_rows", str(metadata.get("visual_rows", 0)))
+        metadata_table.add_row("searchable_visual_rows", str(metadata.get("searchable_visual_rows", 0)))
         console.print(metadata_table)
+
+    multimodal_table = Table(title="Multimodal Manifest")
+    multimodal_table.add_column("Check")
+    multimodal_table.add_column("Value")
+    for key, value in payload["multimodal"]["manifest"].items():
+        multimodal_table.add_row(key, str(value))
+    console.print(multimodal_table)
 
     for warning in payload["warnings"]:
         console.print(f"[yellow]{warning}[/yellow]")
@@ -184,6 +225,14 @@ def _path_warnings(cfg) -> list[str]:
 def _has_adjacent_duplicate_parts(path: Path) -> bool:
     parts = path.parts
     return any(left == right for left, right in zip(parts, parts[1:]))
+
+
+def _external_vision_enabled(cfg) -> bool:
+    provider = cfg.parsing.multimodal.vision.provider
+    return bool(
+        cfg.parsing.multimodal.vision.allow_external_vision
+        and provider in {"openai_compatible", "azure", "gemini", "cloud_vision"}
+    )
 
 
 if __name__ == "__main__":

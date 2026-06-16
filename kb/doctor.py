@@ -36,6 +36,10 @@ def doctor_project(config_path: str | Path = "kb/config.yaml") -> dict[str, Any]
         warnings.append("OCR is enabled; scanned files and embedded images can make indexing slow.")
     if cfg.parsing.office.extract_images:
         warnings.append("office.extract_images=true can trigger OCR/image extraction and increase memory usage.")
+    if cfg.parsing.multimodal.enabled:
+        warnings.append("multimodal.enabled=true can render pages and extract images; raw intake uses conservative limits by default.")
+    if diagnose.get("needs_rebuild"):
+        warnings.append("LanceDB schema is older than expected; run rebuild before querying.")
     if cfg.retrieval.max_concurrent_queries != 1:
         warnings.append("max_concurrent_queries is not 1; set it to 1 to reduce local machine stalls.")
 
@@ -64,6 +68,7 @@ def doctor_project(config_path: str | Path = "kb/config.yaml") -> dict[str, Any]
             "sentence_transformers": importlib.util.find_spec("sentence_transformers") is not None,
             "flag_embedding": importlib.util.find_spec("FlagEmbedding") is not None,
         },
+        "multimodal": diagnose.get("multimodal", {}),
         "warnings": warnings,
     }
 
@@ -78,6 +83,9 @@ def print_doctor(payload: dict[str, Any]) -> None:
         "profile",
         "table_exists",
         "schema_version",
+        "expected_schema_version",
+        "needs_rebuild",
+        "index_role",
         "row_count",
         "fts_index",
         "vector_index",
@@ -90,6 +98,23 @@ def print_doctor(payload: dict[str, Any]) -> None:
     table.add_row("mcp_config", f"codex={mcp['codex']} kiro={mcp['kiro']} agents={mcp['agents']}")
     models = payload["models"]
     table.add_row("models", f"embedding={models['embedding']} sentence_transformers={models['sentence_transformers']} flag_embedding={models['flag_embedding']}")
+    multimodal = payload.get("multimodal", {})
+    if multimodal:
+        table.add_row(
+            "multimodal",
+            (
+                f"enabled={multimodal.get('enabled')} provider={multimodal.get('vision_provider')} "
+                f"external={multimodal.get('external_vision_enabled')} render_pages={multimodal.get('render_pages')}"
+            ),
+        )
+        manifest = multimodal.get("manifest", {})
+        table.add_row(
+            "multimodal_manifest",
+            (
+                f"assets={manifest.get('asset_count', 0)} occurrences={manifest.get('occurrence_count', 0)} "
+                f"ocr_cache={manifest.get('ocr_cache_count', 0)} caption_cache={manifest.get('caption_cache_count', 0)}"
+            ),
+        )
     console.print(table)
     for warning in payload["warnings"]:
         console.print(f"[yellow]{warning}[/yellow]")

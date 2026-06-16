@@ -141,6 +141,7 @@ class ProjectRetriever:
             "top_k": top_k,
             "candidate_k": candidate_k,
             "mode": self.config.retrieval.mode,
+            "index_role": self.config.database.index_role,
             "reranker": reranker,
             "post_ranking": post_ranking,
             "warnings": warnings_list,
@@ -233,7 +234,7 @@ def dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: list[dict[str, Any]] = []
     index_by_key: dict[tuple[str, Any], int] = {}
     for row in rows:
-        key = (str(row.get("source_path") or ""), row.get("chunk_index"))
+        key = (str(row.get("indexed_source_path") or row.get("source_path") or ""), row.get("chunk_index"))
         if key not in index_by_key:
             index_by_key[key] = len(deduped)
             deduped.append(row)
@@ -319,18 +320,42 @@ def format_result(row: dict[str, Any], query: str, max_snippet_chars: int, *, in
     cell_range = _field_or_metadata(row, metadata, "cell_range")
     row_range = _field_or_metadata(row, metadata, "row_range")
     ocr_used = _field_or_metadata(row, metadata, "ocr_used")
+    asset_type = _field_or_metadata(row, metadata, "asset_type")
+    attachment_path = _field_or_metadata(row, metadata, "attachment_path")
+    visual_type = _field_or_metadata(row, metadata, "visual_type")
+    image_hash = _field_or_metadata(row, metadata, "image_hash")
+    indexed_source_path = _field_or_metadata(row, metadata, "indexed_source_path")
+    caption_provider = _field_or_metadata(row, metadata, "caption_provider")
+    caption_model = _field_or_metadata(row, metadata, "caption_model")
+    prompt_version = _field_or_metadata(row, metadata, "prompt_version")
+    searchable = _field_or_metadata(row, metadata, "searchable")
+    confidence = _field_or_metadata(row, metadata, "confidence")
+    snippet = make_snippet(text, query, max_snippet_chars)
+    if asset_type == "visual":
+        location = f"page {page_number}" if page_number else f"slide {slide_number}" if slide_number else "source"
+        snippet = f"Visual summary from source {location}: {snippet}"
     result = {
         "score": _score_from_row(row),
+        "indexed_source_path": indexed_source_path or row.get("indexed_source_path"),
         "source_path": row.get("source_path"),
         "heading": row.get("heading") or None,
         "chunk_index": row.get("chunk_index"),
+        "asset_type": asset_type or None,
+        "visual_type": visual_type or None,
+        "attachment_path": attachment_path or None,
+        "image_hash": image_hash or None,
+        "caption_provider": caption_provider or None,
+        "caption_model": caption_model or None,
+        "prompt_version": prompt_version or None,
+        "searchable": searchable,
+        "confidence": confidence,
         "page_number": page_number,
         "slide_number": slide_number,
         "sheet_name": sheet_name or None,
         "row_range": row_range or None,
         "cell_range": cell_range or None,
         "ocr_used": bool(ocr_used) if ocr_used is not None else None,
-        "snippet": make_snippet(text, query, max_snippet_chars),
+        "snippet": snippet,
         "metadata": metadata,
         "ranking_signals": row.get("_ranking_signals", []),
     }
@@ -381,7 +406,7 @@ def _parse_metadata(value: Any) -> dict[str, Any]:
 
 def _source_filter_sql(source_filter: str) -> str:
     escaped = source_filter.replace("'", "''").replace("%", "\\%")
-    return f"source_path LIKE '%{escaped}%'"
+    return f"(source_path LIKE '%{escaped}%' OR indexed_source_path LIKE '%{escaped}%')"
 
 
 def _field_or_metadata(row: dict[str, Any], metadata: dict[str, Any], key: str):

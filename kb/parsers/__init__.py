@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from kb.parsers.registry import (
     OFFICE_EXTENSIONS,
+    IMAGE_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
     TEXT_EXTENSIONS,
     ParsedDocument,
@@ -11,6 +12,7 @@ from kb.parsers.registry import (
 
 __all__ = [
     "OFFICE_EXTENSIONS",
+    "IMAGE_EXTENSIONS",
     "SUPPORTED_EXTENSIONS",
     "TEXT_EXTENSIONS",
     "ParsedDocument",

@@ -8,6 +8,8 @@ database:
   manifest_path: ".lancedb_raw/manifest.json"
   vector_dimension: 1024
   extracted_cache_dir: ".kb_cache_raw/extracted"
+  multimodal_cache_dir: ".kb_cache_raw/multimodal"
+  index_role: "raw"
 
 scan:
   source_dirs:
@@ -33,6 +35,14 @@ scan:
     - "sources/**/*.yaml"
     - "sources/*.yml"
     - "sources/**/*.yml"
+    - "sources/*.png"
+    - "sources/**/*.png"
+    - "sources/*.jpg"
+    - "sources/**/*.jpg"
+    - "sources/*.jpeg"
+    - "sources/**/*.jpeg"
+    - "sources/*.webp"
+    - "sources/**/*.webp"
   exclude_patterns:
     - ".git/**"
     - ".venv/**"
@@ -69,6 +79,39 @@ parsing:
     extract_notes: true
     max_sheet_rows: 20000
     xlsx_rows_per_section: 500
+  multimodal:
+    enabled: true
+    attachments_dir: "docs/_attachments/kb_assets"
+    pdf:
+      extract_embedded_images: true
+      render_pages: "auto"
+      render_dpi: 180
+      max_rendered_pages_per_file: 30
+      max_visual_assets_per_file: 200
+      min_page_text_chars: 80
+      min_drawing_count_for_render: 8
+      min_image_area_ratio_for_render: 0.25
+    images:
+      min_image_width: 256
+      min_image_height: 256
+      skip_small_icons: true
+      skip_near_blank_images: true
+      skip_logo_like_images: true
+      max_image_pixels: 16000000
+      deduplicate_by_hash: true
+    vision:
+      enabled: false
+      provider: "ocr_only"
+      model: null
+      allow_external_vision: false
+      cache_by_hash: true
+      prompt_version: "vision-caption-v1"
+      max_caption_chars: 4000
+      max_ocr_chars: 4000
+    curated_attachments:
+      mode: "off"
+      allowed_roots:
+        - "docs/_attachments/kb_assets"
 
 retrieval:
   mode: "hybrid"

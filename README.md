@@ -4,6 +4,7 @@ This template creates a local, read-only Project KB with two layers:
 
 - `sources/`: original evidence archive. Never rewrite or delete original source files.
 - `docs/`: curated knowledge source for day-to-day human and AI work. This is also the Obsidian Vault and the default MCP-indexed layer.
+- `docs/_attachments/kb_assets/`: generated visual evidence attachments from raw multimodal intake.
 
 Use `sources/` to verify evidence and `docs/` for reviewed operating knowledge. LanceDB indexes are rebuildable caches.
 
@@ -75,6 +76,7 @@ Raw index:
 ```bash
 uv run project-kb-ingest --config kb/config.raw.yaml --rebuild
 uv run project-kb-query "客户A有哪些核心需求？" --config kb/config.raw.yaml
+uv run project-kb-curate-visual --config kb/config.raw.yaml
 ```
 
 Curated index:
@@ -151,6 +153,98 @@ source_refs:
     cell_range:
 ```
 
+## Multimodal-aware RAG
+
+This template is multimodal-aware, but the first phase is not native image-vector search. Images, rendered PDF pages, and Office embedded images are converted into OCR/caption-backed Markdown or visual chunks, then searched through the existing text vector field.
+
+Default boundary:
+
+- Raw index uses `kb/config.raw.yaml` and can extract visual evidence from `sources/`.
+- Curated index uses `kb/config.yaml`, stays Markdown-first, and remains the default MCP target.
+- Raw visual evidence does not automatically become trusted curated knowledge.
+- To make visual evidence available to daily MCP answers, export it as visual summary Markdown, review it, then rebuild the curated index.
+
+Recommended visual workflow:
+
+```bash
+uv run project-kb-ingest --config kb/config.raw.yaml --rebuild
+uv run project-kb-query "architecture diagram AWS VPC" --config kb/config.raw.yaml
+uv run project-kb-curate-visual --config kb/config.raw.yaml
+uv run project-kb-ingest --config kb/config.yaml --rebuild
+```
+
+`project-kb-curate-visual` writes Obsidian notes to:
+
+```text
+docs/_generated/visual_summaries/needs_review/
+```
+
+Each note embeds the generated asset with Obsidian syntax, keeps structured `source_refs`, and includes source path, page/slide, attachment path, image hash, caption provider, prompt version, OCR text, caption, entities, relationships, architecture notes, and uncertain items.
+
+Visual assets are saved under:
+
+```text
+docs/_attachments/kb_assets/<source_stem>_<source_hash>/
+```
+
+The curated scanner does not recursively index `docs/_attachments/`. If you need opt-in attachment parsing, set:
+
+```yaml
+parsing:
+  multimodal:
+    enabled: true
+    curated_attachments:
+      mode: "referenced_only"
+      allowed_roots:
+        - "docs/_attachments/kb_assets"
+```
+
+This parses only images explicitly referenced by Markdown notes, not the whole attachments folder.
+
+Privacy defaults:
+
+- External vision providers are disabled by default.
+- `allow_external_vision: false` prevents image upload even if API keys exist.
+- Default raw intake uses conservative limits such as `render_pages: auto`, `max_rendered_pages_per_file`, `max_visual_assets_per_file`, `max_image_pixels`, and icon/logo skipping.
+- OCR can read text inside images, but it does not replace visual understanding. Caption quality depends on the configured provider.
+
+Configuration examples:
+
+Low-resource text only:
+
+```yaml
+parsing:
+  multimodal:
+    enabled: false
+```
+
+Raw multimodal intake:
+
+```yaml
+database:
+  index_role: "raw"
+parsing:
+  multimodal:
+    enabled: true
+    pdf:
+      render_pages: "auto"
+      max_rendered_pages_per_file: 30
+    vision:
+      provider: "ocr_only"
+      allow_external_vision: false
+```
+
+External vision opt-in:
+
+```yaml
+parsing:
+  multimodal:
+    vision:
+      enabled: true
+      provider: "openai_compatible"
+      allow_external_vision: true
+```
+
 ## MCP Tools
 
 ```text
@@ -205,6 +299,6 @@ stdio MCP locks only work inside one MCP process. Multiple clients may start mul
 
 ## Supported Formats
 
-Raw index supports `pdf`, `pptx`, `xlsx`, `docx`, `md`, `txt`, `csv`, `json`, `yaml`, `yml`, `py`, `ts`, `tsx`, `js`, `sql`, `toml`, and `ini`.
+Raw index supports `pdf`, `pptx`, `xlsx`, `docx`, `png`, `jpg`, `jpeg`, `webp`, `md`, `txt`, `csv`, `json`, `yaml`, `yml`, `py`, `ts`, `tsx`, `js`, `sql`, `toml`, and `ini`.
 
 Curated index is intentionally Markdown-first and indexes `md`, `csv`, `yaml`, and `yml` under `docs/`.

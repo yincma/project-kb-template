@@ -44,6 +44,8 @@ When organizing knowledge, client inputs, requirements, capabilities, case studi
 
 When the user says the raw index is complete, proactively start the Obsidian curation flow: check raw index status, inventory `sources/`, query raw KB with `uv run project-kb-query ... --config kb/config.raw.yaml`, draft small Markdown notes under `docs/`, preserve structured `source_refs`, update Maps and Canvas, rebuild the curated index, then explain how to open Obsidian Graph View and `docs/01_Maps/Knowledge_Vault.canvas`.
 
+For raw visual evidence, run `uv run project-kb-curate-visual --config kb/config.raw.yaml` to export visual summary Markdown under `docs/_generated/visual_summaries/needs_review/`. Raw visual chunks are evidence intake, not curated knowledge, until reviewed Markdown summaries are indexed from `docs/`.
+
 Before generating or updating Obsidian notes, Maps, or Canvas labels, ask the user which language to use: `中文`, `English`, `日本語`, or follow the source language. If the user has not answered, pause note generation until the language is confirmed.
 
 When generating Obsidian notes, preserve structured `source_refs` with `source_path`, `heading`, `chunk_index`, and available `page_number`, `slide_number`, `sheet_name`, or `cell_range`.
