@@ -8,6 +8,11 @@
   <button id="publish-button" class="button primary">{{ t("publish.confirm") }}</button>
 </section>
 
+<section id="job-progress-panel" class="panel hidden" data-progress-scope="page">
+  <div class="panel-title">Publish progress</div>
+  <div id="job-progress-content"></div>
+</section>
+
 <section class="metric-grid">
   <article class="metric"><span>Reviewed to publish</span><strong>{{ preview.reviewed_count }}</strong></article>
   <article class="metric"><span>Skipped</span><strong>{{ preview.skipped_count }}</strong></article>
@@ -24,4 +29,3 @@
   {% endfor %}
 </section>
 {% endblock %}
-

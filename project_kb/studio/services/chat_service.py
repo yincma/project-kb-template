@@ -33,7 +33,7 @@ class ChatService:
         source_mode = source_mode or self.store.get_setting("default_chat_source", "reviewed")
         search_mode = search_mode or "fast"
         provider = provider or "local_only"
-        content_language = content_language or self.store.get_setting("content_language", "follow_source")
+        content_language = _normalize_content_language(content_language or self.store.get_setting("content_language", "zh"))
 
         with self._query_semaphore:
             payload = self._evidence_search(question, source_mode=source_mode, search_mode=search_mode)
@@ -179,3 +179,7 @@ def _mtime(path: Path) -> float | None:
         return path.stat().st_mtime
     except OSError:
         return None
+
+
+def _normalize_content_language(value: str) -> str:
+    return value if value in {"zh", "ja", "en"} else "zh"

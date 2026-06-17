@@ -9,13 +9,21 @@
 
 <section class="panel">
   <table>
-    <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Exit</th><th>Duration</th></tr></thead>
+    <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Progress</th><th>Exit</th><th>Duration</th></tr></thead>
     <tbody>
       {% for job in jobs %}
-      <tr>
+      <tr data-job-row="{{ job.id }}">
         <td><code>{{ job.id }}</code></td>
         <td>{{ job.type }}</td>
         <td>{{ job.status }}</td>
+        <td>
+          <div class="job-progress" data-job-progress="{{ job.id }}">
+            <div class="progress-bar {% if job.progress_percent is none and job.status == 'running' %}indeterminate{% endif %}">
+              <span style="width: {{ job.progress_percent or 0 }}%"></span>
+            </div>
+            <small>{{ job.progress_message or "" }}</small>
+          </div>
+        </td>
         <td>{{ job.exit_code }}</td>
         <td>{{ job.duration_ms }}</td>
       </tr>
@@ -24,4 +32,3 @@
   </table>
 </section>
 {% endblock %}
-

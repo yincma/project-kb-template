@@ -29,6 +29,14 @@
         <option value="local_answer">Local Answer Mode</option>
       </select>
     </label>
+    <label>Generated language
+      <select id="chat-content-language">
+        <option value="zh" {% if settings.content_language == "zh" %}selected{% endif %}>中文</option>
+        <option value="ja" {% if settings.content_language == "ja" %}selected{% endif %}>日本語</option>
+        <option value="en" {% if settings.content_language == "en" %}selected{% endif %}>English</option>
+      </select>
+    </label>
+    <p class="muted">Evidence snippets remain in the source language.</p>
     <div class="quick-actions">
       <a href="/sources">Import new files</a>
       <a href="/review">Review pending notes</a>

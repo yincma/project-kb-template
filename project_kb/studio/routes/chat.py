@@ -11,6 +11,8 @@ from project_kb.studio.services.state import utc_now
 
 
 router = APIRouter()
+CONTENT_LANGUAGES = {"zh", "ja", "en"}
+LEGACY_CONTENT_LANGUAGES = {"follow_source"}
 
 
 @router.get("/chat")
@@ -27,25 +29,38 @@ async def api_chat_message(request: Request):
     provider = body.get("provider") or "local_only"
     if provider == "external_llm":
         raise HTTPException(status_code=501, detail="External LLM mode is not implemented in this MVP.")
+    content_language = body.get("content_language")
+    if content_language is None:
+        content_language = _normalize_content_language(request.app.state.store.get_setting("content_language", "zh"))
+    elif content_language not in CONTENT_LANGUAGES:
+        raise HTTPException(status_code=400, detail="content_language must be zh, ja, or en.")
     response = await run_in_threadpool(
         request.app.state.chat_service.ask,
         question,
         source_mode=body.get("source_mode") or "reviewed",
         search_mode=body.get("search_mode") or "fast",
         provider=provider,
-        content_language=body.get("content_language"),
+        content_language=content_language,
     )
-    _save_chat_messages(request, question=question, response=response, provider=provider)
+    _save_chat_messages(request, question=question, response=response, provider=provider, content_language=content_language)
     return response
 
 
-def _save_chat_messages(request: Request, *, question: str, response: dict, provider: str) -> None:
+def _normalize_content_language(value) -> str:
+    if value in CONTENT_LANGUAGES:
+        return value
+    if value in LEGACY_CONTENT_LANGUAGES:
+        return "zh"
+    return "zh"
+
+
+def _save_chat_messages(request: Request, *, question: str, response: dict, provider: str, content_language: str) -> None:
     store = request.app.state.store
     store.execute(
         """
         INSERT INTO chat_messages
-            (id, session_id, role, content, source_refs_json, warnings_json, mode, provider, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, session_id, role, content, source_refs_json, warnings_json, mode, provider, content_language, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             uuid.uuid4().hex,
@@ -56,6 +71,7 @@ def _save_chat_messages(request: Request, *, question: str, response: dict, prov
             "[]",
             None,
             provider,
+            content_language,
             utc_now(),
         ),
     )
@@ -67,8 +83,8 @@ def _save_chat_messages(request: Request, *, question: str, response: dict, prov
     store.execute(
         """
         INSERT INTO chat_messages
-            (id, session_id, role, content, source_refs_json, warnings_json, mode, provider, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, session_id, role, content, source_refs_json, warnings_json, mode, provider, content_language, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             uuid.uuid4().hex,
@@ -79,6 +95,7 @@ def _save_chat_messages(request: Request, *, question: str, response: dict, prov
             json.dumps(response.get("warnings") or [], ensure_ascii=False),
             response.get("mode"),
             response.get("requested_provider") or provider,
+            response.get("content_language") or content_language,
             utc_now(),
         ),
     )

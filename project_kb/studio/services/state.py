@@ -129,6 +129,7 @@ class StateStore:
                 warnings_json TEXT NOT NULL DEFAULT '[]',
                 mode TEXT,
                 provider TEXT,
+                content_language TEXT,
                 created_at TEXT NOT NULL
             )
             """,
@@ -142,7 +143,12 @@ class StateStore:
                 created_at TEXT NOT NULL,
                 started_at TEXT,
                 finished_at TEXT,
-                duration_ms INTEGER
+                duration_ms INTEGER,
+                progress_current INTEGER,
+                progress_total INTEGER,
+                progress_percent REAL,
+                progress_message TEXT,
+                progress_updated_at TEXT
             )
             """,
             """
@@ -194,6 +200,18 @@ class StateStore:
                 "warnings_json": "TEXT NOT NULL DEFAULT '[]'",
                 "mode": "TEXT",
                 "provider": "TEXT",
+                "content_language": "TEXT",
+            },
+        )
+        self._ensure_columns(
+            conn,
+            "jobs",
+            {
+                "progress_current": "INTEGER",
+                "progress_total": "INTEGER",
+                "progress_percent": "REAL",
+                "progress_message": "TEXT",
+                "progress_updated_at": "TEXT",
             },
         )
 
@@ -301,18 +319,31 @@ class StateStore:
 
     def create_job(self, *, job_type: str, command: dict[str, Any], status: str = "queued") -> str:
         job_id = uuid.uuid4().hex
+        now = utc_now()
         self.execute(
             """
-            INSERT INTO jobs (id, type, status, command, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO jobs
+                (id, type, status, command, created_at, progress_current, progress_total, progress_percent, progress_message, progress_updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (job_id, job_type, status, json.dumps(command, ensure_ascii=False), utc_now()),
+            (job_id, job_type, status, json.dumps(command, ensure_ascii=False), now, 0, None, 0, "Queued", now),
         )
         (self.jobs_dir / job_id).mkdir(parents=True, exist_ok=True)
         return job_id
 
     def update_job(self, job_id: str, **fields: Any) -> None:
-        allowed = {"status", "exit_code", "started_at", "finished_at", "duration_ms"}
+        allowed = {
+            "status",
+            "exit_code",
+            "started_at",
+            "finished_at",
+            "duration_ms",
+            "progress_current",
+            "progress_total",
+            "progress_percent",
+            "progress_message",
+            "progress_updated_at",
+        }
         assignments = []
         values: list[Any] = []
         for key, value in fields.items():

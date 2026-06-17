@@ -8,6 +8,11 @@
   <button class="button primary" data-job="import">{{ t("sources.import") }}</button>
 </section>
 
+<section id="job-progress-panel" class="panel hidden" data-progress-scope="page">
+  <div class="panel-title">Job progress</div>
+  <div id="job-progress-content"></div>
+</section>
+
 <section class="panel">
   <div id="drop-zone" class="drop-zone">
     <strong>{{ t("sources.upload") }}</strong>
@@ -34,4 +39,3 @@
   </table>
 </section>
 {% endblock %}
-

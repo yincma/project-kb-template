@@ -32,7 +32,7 @@ def template_context(request: Request, **extra):
 def default_settings(settings: dict, project_root=None) -> dict:
     defaults = {
         "ui_language": "follow_browser",
-        "content_language": "follow_source",
+        "content_language": "zh",
         "profile": "balanced",
         "ocr": "off",
         "visual_extraction": "off",
@@ -40,6 +40,8 @@ def default_settings(settings: dict, project_root=None) -> dict:
         "external_llm_enabled": False,
     }
     merged = {**defaults, **settings}
+    if merged.get("content_language") not in {"zh", "ja", "en"}:
+        merged["content_language"] = "zh"
     merged["profile"] = current_config_profile(project_root)
     return merged
 

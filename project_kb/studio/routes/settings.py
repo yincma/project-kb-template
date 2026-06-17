@@ -44,7 +44,7 @@ async def api_i18n(lang: str, request: Request):
 
 SETTING_ENUMS = {
     "ui_language": {"zh", "ja", "en", "follow_browser"},
-    "content_language": {"zh", "ja", "en", "follow_source"},
+    "content_language": {"zh", "ja", "en"},
     "profile": {"lite", "balanced", "accurate"},
     "default_chat_source": {"reviewed", "raw", "both"},
     "ocr": {"off", "on"},

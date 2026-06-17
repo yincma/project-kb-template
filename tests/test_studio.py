@@ -5,6 +5,7 @@ from pathlib import Path
 import os
 import sqlite3
 import subprocess
+import sys
 import time
 
 from fastapi.testclient import TestClient
@@ -17,7 +18,7 @@ from project_kb.studio.app import create_app
 from project_kb.studio.services.chat_service import ChatService
 from project_kb.studio.services.command_runner import CommandEnum, CommandResult, CommandRunner
 from project_kb.studio.services.i18n import TRANSLATIONS, browser_language
-from project_kb.studio.services.job_runner import JobRunner
+from project_kb.studio.services.job_runner import JobRunner, parse_progress_line
 from project_kb.studio.services.mcp_config import MCPConfigService
 from project_kb.studio.services.publish import PublishService
 from project_kb.studio.services.review import ReviewService
@@ -155,6 +156,80 @@ def test_job_creation(studio_root: Path):
     job_id = store.create_job(job_type="import", command={"command": "import_sources"})
     job = store.query_one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     assert job["status"] == "queued"
+    assert job["progress_percent"] == 0
+    assert job["progress_message"] == "Queued"
+
+
+def test_jobs_schema_migrates_progress_columns(studio_root: Path):
+    db_path = studio_root / ".project-kb" / "state.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE jobs (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            command TEXT NOT NULL,
+            exit_code INTEGER,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            duration_ms INTEGER
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    StateStore(studio_root)
+
+    conn = sqlite3.connect(db_path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    conn.close()
+    assert {
+        "progress_current",
+        "progress_total",
+        "progress_percent",
+        "progress_message",
+        "progress_updated_at",
+    }.issubset(columns)
+
+
+def test_progress_parser_handles_indexing_file():
+    progress = parse_progress_line("Indexing file 2/5: docs/a.md")
+    assert progress == {
+        "progress_current": 2,
+        "progress_total": 5,
+        "progress_percent": 40.0,
+        "progress_message": "Indexing file 2/5: docs/a.md",
+    }
+
+
+def test_streaming_runner_writes_logs_and_progress(monkeypatch, studio_root: Path):
+    store = StateStore(studio_root)
+    command_runner = CommandRunner(studio_root)
+    monkeypatch.setattr(
+        command_runner,
+        "argv_for",
+        lambda command, params=None: [
+            sys.executable,
+            "-c",
+            "print('Indexing file 2/5: docs/a.md'); print('Embedding docs/a.md')",
+        ],
+    )
+    runner = JobRunner(studio_root, store, command_runner)
+    job_id = store.create_job(job_type="import", command={"command": "import_sources"})
+    result = runner._run_streaming_command(job_id, CommandEnum.IMPORT_SOURCES, {})
+    job = store.query_one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    logs = store.query_all("SELECT stream, message FROM job_logs WHERE job_id = ? ORDER BY rowid", (job_id,))
+    assert result.exit_code == 0
+    assert job["progress_percent"] is None
+    assert job["progress_message"] == "Vectorizing docs/a.md"
+    stdout_text = (store.jobs_dir / job_id / "stdout.log").read_text(encoding="utf-8")
+    assert "Indexing file 2/5: docs/a.md" in stdout_text
+    assert "Embedding docs/a.md" in stdout_text
+    assert any(row["message"] == "Embedding docs/a.md" for row in logs)
 
 
 def test_job_logs_saved(studio_root: Path):
@@ -210,10 +285,12 @@ def test_chat_without_llm_returns_evidence_search(monkeypatch, studio_root: Path
             "suggested_actions": [],
         },
     )
-    payload = service.ask("What is the goal?")
+    payload = service.ask("What is the goal?", content_language="ja")
     assert payload["mode"] == "evidence_search"
     assert payload["answer_available"] is False
     assert payload["answer"] is None
+    assert payload["content_language"] == "ja"
+    assert payload["evidence"][0]["snippet"] == "Demo Project goal"
 
 
 def test_local_answer_requires_source_refs(monkeypatch, studio_root: Path):
@@ -235,6 +312,36 @@ def test_local_answer_requires_source_refs(monkeypatch, studio_root: Path):
     assert payload["mode"] == "evidence_search"
     assert payload["answer_available"] is False
     assert any("source_refs" in warning for warning in payload["warnings"])
+
+
+def test_local_answer_receives_selected_content_language(monkeypatch, studio_root: Path):
+    store = StateStore(studio_root)
+    service = ChatService(studio_root, store)
+    captured = {}
+
+    def fake_answer_engine(**kwargs):
+        captured["content_language"] = kwargs["content_language"]
+        return {
+            "answer": "回答",
+            "source_refs": [{"source_path": "docs/reviewed.md", "heading": "Demo", "chunk_index": 0}],
+        }
+
+    service.local_answer_engine = fake_answer_engine
+    monkeypatch.setattr(
+        service,
+        "_evidence_search",
+        lambda question, *, source_mode, search_mode: {
+            "evidence": [{"source_path": "docs/reviewed.md", "snippet": "原文"}],
+            "source_refs": [{"source_path": "docs/reviewed.md", "heading": "Demo", "chunk_index": 0}],
+            "related_notes": [],
+            "warnings": [],
+            "suggested_actions": [],
+        },
+    )
+    payload = service.ask("Question", provider="local_answer", content_language="ja")
+    assert captured["content_language"] == "ja"
+    assert payload["mode"] == "local_answer"
+    assert payload["content_language"] == "ja"
 
 
 def test_chat_page_hides_external_llm_provider(client: TestClient):
@@ -301,7 +408,7 @@ def test_chat_api_uses_threadpool_and_saves_assistant_message(monkeypatch, clien
     assert response.status_code == 200
     assert calls == {"threadpool": 1, "ask": 1}
     rows = client.app.state.store.query_all(
-        "SELECT role, content, source_refs_json, warnings_json, mode, provider FROM chat_messages ORDER BY rowid"
+        "SELECT role, content, source_refs_json, warnings_json, mode, provider, content_language FROM chat_messages ORDER BY rowid"
     )
     assert [row["role"] for row in rows] == ["user", "assistant"]
     assistant = rows[1]
@@ -310,6 +417,46 @@ def test_chat_api_uses_threadpool_and_saves_assistant_message(monkeypatch, clien
     assert json.loads(assistant["warnings_json"]) == ["Evidence Search Mode"]
     assert assistant["mode"] == "evidence_search"
     assert assistant["provider"] == "local_only"
+    assert assistant["content_language"] == "zh"
+
+
+def test_chat_api_rejects_invalid_content_language(client: TestClient):
+    response = client.post(
+        "/api/chat/messages",
+        headers=csrf(client),
+        json={"question": "What changed?", "content_language": "fr"},
+    )
+    assert response.status_code == 400
+
+
+def test_chat_api_normalizes_legacy_content_language_setting(monkeypatch, client: TestClient):
+    captured = {}
+    client.app.state.store.set_setting("content_language", "follow_source")
+
+    def fake_ask(question, **kwargs):
+        captured["content_language"] = kwargs["content_language"]
+        return {
+            "mode": "evidence_search",
+            "answer_available": False,
+            "answer": None,
+            "evidence": [],
+            "source_refs": [],
+            "related_notes": [],
+            "warnings": [],
+            "suggested_actions": [],
+            "requested_provider": kwargs.get("provider"),
+            "content_language": kwargs["content_language"],
+        }
+
+    monkeypatch.setattr(client.app.state.chat_service, "ask", fake_ask)
+    response = client.post(
+        "/api/chat/messages",
+        headers=csrf(client),
+        json={"question": "What changed?"},
+    )
+    assert response.status_code == 200
+    assert captured["content_language"] == "zh"
+    assert response.json()["content_language"] == "zh"
 
 
 def test_chat_messages_schema_migrates_old_database(studio_root: Path):
@@ -336,7 +483,7 @@ def test_chat_messages_schema_migrates_old_database(studio_root: Path):
     conn = sqlite3.connect(db_path)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(chat_messages)").fetchall()}
     conn.close()
-    assert {"warnings_json", "mode", "provider"}.issubset(columns)
+    assert {"warnings_json", "mode", "provider", "content_language"}.issubset(columns)
 
 
 def test_review_scans_markdown_frontmatter(studio_root: Path):
@@ -522,6 +669,27 @@ def test_review_api_returns_single_note_and_approves_second(client: TestClient, 
     second_frontmatter = yaml.safe_load((studio_root / "docs" / "b.md").read_text(encoding="utf-8").split("---", 2)[1])
     assert first_frontmatter["status"] == "needs_review"
     assert second_frontmatter["status"] == "reviewed"
+    pending = client.get("/api/review-items?status=needs_review").json()["items"]
+    assert [item["rel_path"] for item in pending] == ["docs/a.md"]
+
+
+def test_review_page_defaults_to_needs_review(client: TestClient, studio_root: Path):
+    _write_note(studio_root / "docs" / "pending.md", status="needs_review", source_path="sources/sample_proposal.pdf")
+    _write_note(studio_root / "docs" / "done.md", status="reviewed", source_path="sources/sample_proposal.pdf")
+    (studio_root / "docs" / "pending.md").write_text(
+        (studio_root / "docs" / "pending.md").read_text(encoding="utf-8").replace("# Demo Project", "# Pending Note"),
+        encoding="utf-8",
+    )
+    (studio_root / "docs" / "done.md").write_text(
+        (studio_root / "docs" / "done.md").read_text(encoding="utf-8").replace("# Demo Project", "# Done Note"),
+        encoding="utf-8",
+    )
+    response = client.get("/review")
+    assert response.status_code == 200
+    assert '<option value="needs_review" selected>' in response.text
+    assert "Pending Note" in response.text
+    assert "Done Note" not in response.text
+    assert "review-busy" in (ROOT / "project_kb" / "studio" / "static" / "app.css").read_text(encoding="utf-8")
 
 
 def test_i18n_supports_zh_ja_en():
@@ -545,6 +713,30 @@ def test_ui_and_content_language_are_separate(client: TestClient):
     settings = response.json()["settings"]
     assert settings["ui_language"] == "ja"
     assert settings["content_language"] == "en"
+
+
+def test_settings_and_chat_language_options(client: TestClient):
+    settings = client.get("/settings")
+    chat = client.get("/chat")
+    assert settings.status_code == 200
+    assert chat.status_code == 200
+    for label in ("中文", "日本語", "English"):
+        assert label in settings.text
+        assert label in chat.text
+    assert 'value="follow_source"' not in settings.text
+    assert 'id="chat-content-language"' in chat.text
+
+
+def test_job_progress_ui_present(client: TestClient):
+    client.app.state.store.create_job(job_type="import", command={"command": "import_sources"})
+    for path, marker in (
+        ("/sources", "job-progress-panel"),
+        ("/publish", "job-progress-panel"),
+        ("/jobs", "progress-bar"),
+    ):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert marker in response.text
 
 
 def test_saved_ui_language_overrides_old_cookie(client: TestClient):

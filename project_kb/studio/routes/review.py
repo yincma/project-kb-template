@@ -10,7 +10,7 @@ router = APIRouter()
 
 @router.get("/review")
 async def review_page(request: Request):
-    notes = request.app.state.review_service.scan_notes()
+    notes = request.app.state.review_service.filter_notes(status="needs_review")
     return render(request, "review.html", notes=notes)
 
 
