@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>{{ t("chat.title") }}</h1>
+    <p class="mode-banner">{{ t("chat.evidence_mode") }}</p>
+  </div>
+</section>
+
+<section class="chat-layout">
+  <aside class="panel compact">
+    <div class="panel-title">Project status</div>
+    <label>Knowledge source
+      <select id="chat-source">
+        <option value="reviewed">Reviewed Docs</option>
+        <option value="raw">Raw Sources</option>
+        <option value="both">Both</option>
+      </select>
+    </label>
+    <label>Mode
+      <select id="chat-search-mode">
+        <option value="fast">Fast</option>
+        <option value="deep">Deep</option>
+      </select>
+    </label>
+    <label>Provider
+      <select id="chat-provider">
+        <option value="local_only">Local only</option>
+        <option value="local_answer">Local Answer Mode</option>
+        <option value="external_llm">External LLM</option>
+      </select>
+    </label>
+    <div class="quick-actions">
+      <a href="/sources">Import new files</a>
+      <a href="/review">Review pending notes</a>
+      <a href="/publish">Publish reviewed docs</a>
+      <a href="/agent-hub">Configure Codex/Kiro</a>
+    </div>
+  </aside>
+
+  <section class="panel chat-panel">
+    <div id="chat-messages" class="chat-messages"></div>
+    <form id="chat-form" class="chat-form">
+      <textarea id="chat-question" rows="4" placeholder="{{ t('chat.placeholder') }}"></textarea>
+      <button class="button primary" type="submit">{{ t("chat.ask") }}</button>
+    </form>
+  </section>
+
+  <aside class="panel compact">
+    <div class="panel-title">{{ t("chat.sources") }}</div>
+    <div id="evidence-panel" class="evidence-panel"></div>
+  </aside>
+</section>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>{{ t("jobs.title") }}</h1>
+    <p>Heavy jobs run one at a time. Running jobs found after restart are marked interrupted.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <table>
+    <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Exit</th><th>Duration</th></tr></thead>
+    <tbody>
+      {% for job in jobs %}
+      <tr>
+        <td><code>{{ job.id }}</code></td>
+        <td>{{ job.type }}</td>
+        <td>{{ job.status }}</td>
+        <td>{{ job.exit_code }}</td>
+        <td>{{ job.duration_ms }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+

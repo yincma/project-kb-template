@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>{{ t("settings.title") }}</h1>
+    <p>UI language controls Studio labels. Content language controls Chat responses when answer generation is available.</p>
+  </div>
+</section>
+
+<section class="panel settings-panel">
+  <label>{{ t("settings.ui_language") }}
+    <select id="ui-language">
+      <option value="follow_browser" {% if settings.ui_language == "follow_browser" %}selected{% endif %}>Follow browser</option>
+      <option value="zh" {% if settings.ui_language == "zh" %}selected{% endif %}>中文</option>
+      <option value="ja" {% if settings.ui_language == "ja" %}selected{% endif %}>日本語</option>
+      <option value="en" {% if settings.ui_language == "en" %}selected{% endif %}>English</option>
+    </select>
+  </label>
+  <label>{{ t("settings.content_language") }}
+    <select id="content-language">
+      <option value="follow_source" {% if settings.content_language == "follow_source" %}selected{% endif %}>Follow source language</option>
+      <option value="zh" {% if settings.content_language == "zh" %}selected{% endif %}>中文</option>
+      <option value="ja" {% if settings.content_language == "ja" %}selected{% endif %}>日本語</option>
+      <option value="en" {% if settings.content_language == "en" %}selected{% endif %}>English</option>
+    </select>
+  </label>
+  <label>Profile
+    <select id="profile">
+      <option value="lite" {% if settings.profile == "lite" %}selected{% endif %}>lite</option>
+      <option value="balanced" {% if settings.profile == "balanced" %}selected{% endif %}>balanced</option>
+      <option value="accurate" {% if settings.profile == "accurate" %}selected{% endif %}>accurate</option>
+    </select>
+  </label>
+  <label>Default chat source
+    <select id="default-chat-source">
+      <option value="reviewed" {% if settings.default_chat_source == "reviewed" %}selected{% endif %}>Reviewed Docs</option>
+      <option value="raw" {% if settings.default_chat_source == "raw" %}selected{% endif %}>Raw Sources</option>
+      <option value="both" {% if settings.default_chat_source == "both" %}selected{% endif %}>Both</option>
+    </select>
+  </label>
+  <label class="checkbox"><input id="external-llm-enabled" type="checkbox" {% if settings.external_llm_enabled %}checked{% endif %}> External LLM enabled after explicit confirmation</label>
+  <button id="save-settings" class="button primary">{{ t("settings.save") }}</button>
+</section>
+{% endblock %}
+

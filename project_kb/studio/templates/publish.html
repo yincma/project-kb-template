@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>{{ t("publish.title") }}</h1>
+    <p>Only <code>status=reviewed</code> notes are published by default.</p>
+  </div>
+  <button id="publish-button" class="button primary">{{ t("publish.confirm") }}</button>
+</section>
+
+<section class="metric-grid">
+  <article class="metric"><span>Reviewed to publish</span><strong>{{ preview.reviewed_count }}</strong></article>
+  <article class="metric"><span>Skipped</span><strong>{{ preview.skipped_count }}</strong></article>
+  <article class="metric"><span>Missing source_refs</span><strong>{{ preview.missing_source_refs_count }}</strong></article>
+  <article class="metric"><span>Target index</span><strong>{{ preview.index_path }}</strong><small>{{ preview.config_path }}</small></article>
+</section>
+
+<section class="panel">
+  <div class="panel-title">Skipped by status</div>
+  <pre>{{ preview.skipped_by_status }}</pre>
+  <div class="panel-title">Warnings</div>
+  {% for item in preview.missing_source_refs %}
+  <p class="warning">{{ item }} is reviewed but missing source_refs.</p>
+  {% endfor %}
+</section>
+{% endblock %}
+

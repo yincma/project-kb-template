@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>{{ t("home.title") }}</h1>
+    <p>{{ t("home.subtitle") }}</p>
+  </div>
+  <a class="button primary" href="/chat">Ask AI</a>
+</section>
+
+<section class="flow">
+  <span>Import</span>
+  <span>Curate</span>
+  <span>Review</span>
+  <span>Publish</span>
+  <span>Chat / Agent</span>
+</section>
+
+<section class="metric-grid">
+  <article class="metric">
+    <span>Sources</span>
+    <strong>{{ status.sources.count }}</strong>
+    <small>{{ status.sources.indexed }} indexed · {{ status.sources.failed }} failed</small>
+  </article>
+  <article class="metric">
+    <span>AI Notes</span>
+    <strong>{{ status.ai_notes.generated }}</strong>
+    <small>{{ status.ai_notes.needs_review }} pending · {{ status.ai_notes.evidence_gaps }} gaps</small>
+  </article>
+  <article class="metric">
+    <span>Reviewed Docs</span>
+    <strong>{{ status.reviewed_docs.reviewed }}</strong>
+    <small>{{ status.reviewed_docs.publishable }} publishable</small>
+  </article>
+  <article class="metric">
+    <span>Agent Knowledge</span>
+    <strong>{{ status.agent_knowledge.index_path }}</strong>
+    <small>Codex {{ "ready" if status.agent_knowledge.codex.config_exists else "not configured" }}</small>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-title">{{ t("home.next") }}</div>
+  <p>{{ status.recommended_next_step }}</p>
+  <div class="actions">
+    <a class="button" href="/sources">Import Sources</a>
+    <button class="button" data-job="curate">Curate Notes</button>
+    <a class="button" href="/review">Continue Review</a>
+    <a class="button" href="/publish">Publish to Agent</a>
+    <a class="button primary" href="/chat">Ask AI</a>
+  </div>
+</section>
+{% endblock %}
+

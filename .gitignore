@@ -2,6 +2,7 @@
 .lancedb_raw/
 .kb_cache/
 .kb_cache_raw/
+.project-kb/
 kb/cache/
 .venv/
 .env

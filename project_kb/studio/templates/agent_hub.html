@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>{{ t("agent.title") }}</h1>
+    <p>External agents use MCP. Studio does not replace Chat.</p>
+  </div>
+</section>
+
+<section class="metric-grid two">
+  <article class="panel">
+    <div class="panel-title">Codex</div>
+    <p>Config exists: {{ agent_status.codex.config_exists }}</p>
+    <p>MCP command valid: {{ agent_status.codex.mcp_command_valid }}</p>
+    <button class="button" data-preview-agent="codex">Preview Install</button>
+    <button class="button primary" data-confirm-agent="codex">Confirm Install</button>
+  </article>
+  <article class="panel">
+    <div class="panel-title">Kiro</div>
+    <p>Config exists: {{ agent_status.kiro.config_exists }}</p>
+    <p>MCP command valid: {{ agent_status.kiro.mcp_command_valid }}</p>
+    <button class="button" data-preview-agent="kiro">Preview Install</button>
+    <button class="button primary" data-confirm-agent="kiro">Confirm Install</button>
+  </article>
+</section>
+<section class="panel">
+  <div class="panel-title">Preview / Diff</div>
+  <pre id="agent-preview"></pre>
+</section>
+{% endblock %}
+

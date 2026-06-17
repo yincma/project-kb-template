@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="{{ lang }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>{{ t("app.name") }}</title>
+    <link rel="stylesheet" href="/static/app.css">
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">KB</span>
+          <div>
+            <strong>{{ t("app.name") }}</strong>
+            <span>{{ t("status.local_only") }}</span>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="/">{{ t("nav.home") }}</a>
+          <a href="/chat">{{ t("nav.chat") }}</a>
+          <a href="/sources">{{ t("nav.sources") }}</a>
+          <a href="/review">{{ t("nav.review") }}</a>
+          <a href="/publish">{{ t("nav.publish") }}</a>
+          <a href="/agent-hub">{{ t("nav.agent_hub") }}</a>
+          <a href="/jobs">{{ t("nav.jobs") }}</a>
+          <a href="/settings">{{ t("nav.settings") }}</a>
+        </nav>
+        <div class="sidebar-footer">
+          <select id="quick-language" aria-label="UI language">
+            <option value="follow_browser">Follow browser</option>
+            <option value="zh" {% if settings.ui_language == "zh" %}selected{% endif %}>中文</option>
+            <option value="ja" {% if settings.ui_language == "ja" %}selected{% endif %}>日本語</option>
+            <option value="en" {% if settings.ui_language == "en" %}selected{% endif %}>English</option>
+          </select>
+        </div>
+      </aside>
+      <main class="main">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+

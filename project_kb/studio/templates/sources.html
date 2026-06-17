@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>{{ t("sources.title") }}</h1>
+    <p>Files are stored locally under <code>sources/</code>.</p>
+  </div>
+  <button class="button primary" data-job="import">{{ t("sources.import") }}</button>
+</section>
+
+<section class="panel">
+  <div id="drop-zone" class="drop-zone">
+    <strong>{{ t("sources.upload") }}</strong>
+    <span>Drag files here or choose files. ZIP extraction is not supported in MVP.</span>
+    <input id="source-files" type="file" multiple>
+    <button id="upload-button" class="button">Upload</button>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-title">File list</div>
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for item in sources %}
+      <tr>
+        <td>{{ item.rel_path }}</td>
+        <td>{{ item.type }}</td>
+        <td>{{ item.size }}</td>
+        <td><span class="status">{{ item.status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+

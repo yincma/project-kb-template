@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>{{ t("review.title") }}</h1>
+    <p>Markdown frontmatter is the source of truth for review state.</p>
+  </div>
+</section>
+
+<section class="review-layout">
+  <aside class="panel compact">
+    <div class="panel-title">Pending review</div>
+    {% for note in notes %}
+    <button class="note-row" data-note-id="{{ note.id }}">
+      <span>{{ note.title }}</span>
+      <small>{{ note.status }}</small>
+    </button>
+    {% endfor %}
+  </aside>
+  <section class="panel">
+    <div class="panel-title">Preview</div>
+    {% if notes %}
+    {% set note = notes[0] %}
+    <h2>{{ note.title }}</h2>
+    <p><code>{{ note.rel_path }}</code></p>
+    <pre class="markdown-preview">{{ note.body_preview }}</pre>
+    <div class="actions">
+      <button class="button primary" data-approve="{{ note.id }}">{{ t("review.approve") }}</button>
+      <button class="button" data-mark-gap="{{ note.id }}">Mark Evidence Gap</button>
+      <button class="button" data-mark-duplicate="{{ note.id }}">Mark Duplicate</button>
+    </div>
+    {% endif %}
+  </section>
+  <aside class="panel compact">
+    <div class="panel-title">source_refs</div>
+    {% if notes %}
+      {% for ref in notes[0].source_refs %}
+      <div class="source-ref"><code>{{ ref.source_path }}</code><small>{{ ref.heading }} chunk={{ ref.chunk_index }}</small></div>
+      {% endfor %}
+      {% for warning in notes[0].warnings %}
+      <p class="warning">{{ warning }}</p>
+      {% endfor %}
+    {% endif %}
+  </aside>
+</section>
+{% endblock %}
+

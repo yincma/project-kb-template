@@ -8,6 +8,90 @@ This template creates a local, read-only Project KB with two layers:
 
 Use `sources/` to verify evidence and `docs/` for reviewed operating knowledge. LanceDB indexes are rebuildable caches.
 
+## Web GUI Quick Start
+
+Project KB Studio is a local web console for people who do not want to operate the knowledge base from a terminal. It does not upload project files, does not replace Obsidian, and does not replace the CLI/Core execution layer.
+
+Start Studio:
+
+```bash
+uv run project-kb-studio
+```
+
+Default address:
+
+```text
+http://127.0.0.1:8765
+```
+
+Useful options:
+
+```bash
+uv run project-kb-studio --no-browser
+uv run project-kb-studio --project-root .
+uv run project-kb-studio --host 127.0.0.1 --port 8765
+```
+
+Studio is local-only by default. It binds to `127.0.0.1`, keeps state under `.project-kb/`, and writes uploaded files only into `sources/`. If you explicitly bind to a non-localhost host, Studio prints a security warning.
+
+### GUI / CLI / MCP / Obsidian
+
+- GUI: upload sources, start import jobs, review drafts, publish reviewed docs, inspect logs, configure Codex/Kiro MCP, and use local Chat.
+- CLI/Core: reliable execution layer for ingest, query, doctor, diagnostics, and index rebuilds.
+- MCP: read-only access for Codex, Kiro, and other agents against the published curated knowledge base.
+- Obsidian: formal editing, long-form writing, links, Canvas, Graph View, and human knowledge refinement.
+
+Markdown frontmatter in `docs/` is the source of truth for note review status. Studio scans `docs/` when opening Review or Publish; SQLite is only a GUI cache and job ledger.
+
+### Studio Chat Modes
+
+Default Chat settings:
+
+- Knowledge source: Reviewed Docs
+- Mode: Fast
+- Provider: Local only / disabled external
+
+Studio Chat supports three modes:
+
+- Evidence Search Mode: used when no answer engine or LLM provider is available. Studio returns evidence snippets, `source_refs`, and related notes, but does not generate a summary answer.
+- Local Answer Mode: used only if a local answer engine is configured in the project. Answers must include `source_refs`.
+- External LLM Mode: disabled by default. If enabled in Settings, Studio warns that selected retrieved context may be sent to an external service. Studio sends only necessary context, never full project folders.
+
+Source refs, filenames, and original snippets are not translated.
+
+### Publishing Rules
+
+Publish defaults are strict:
+
+- Publish only `status=reviewed`.
+- Skip `needs_review`, `evidence_gap`, and `possible_duplicate`.
+- Warn on reviewed notes that are missing `source_refs`.
+- Show the target index before publishing: `kb/config.yaml` / `.lancedb`.
+- Generate a publish report under `.project-kb/jobs/<job_id>/publish_report.json`.
+
+### Codex and Kiro
+
+The Agent Hub page checks Codex and Kiro MCP configuration. Installing or modifying config is a high-risk write operation:
+
+1. Studio detects the existing config.
+2. Studio shows the proposed config or diff.
+3. Studio backs up the original file, for example `config.toml.bak.<timestamp>`.
+4. Studio writes only after confirmation.
+5. Studio offers a test/status check after writing.
+
+Studio does not silently overwrite existing agent config.
+
+### Privacy and Local Security
+
+- No cloud upload by default.
+- External LLM mode is opt-in only.
+- All write APIs require CSRF tokens and same-origin checks.
+- Upload filenames are sanitized.
+- Same-name uploads are automatically renamed rather than overwritten.
+- Logs avoid storing complete sensitive source content.
+
+For the full operator guide, see `guides/runbooks/web_gui.md`.
+
 ## Prerequisites
 
 ```text
@@ -75,7 +159,7 @@ Raw index:
 
 ```bash
 uv run project-kb-ingest --config kb/config.raw.yaml --rebuild
-uv run project-kb-query "客户A有哪些核心需求？" --config kb/config.raw.yaml
+uv run project-kb-query "Client A key requirements" --config kb/config.raw.yaml
 uv run project-kb-curate-visual --config kb/config.raw.yaml
 ```
 
@@ -83,7 +167,7 @@ Curated index:
 
 ```bash
 uv run project-kb-ingest --config kb/config.yaml --rebuild
-uv run project-kb-query "客户A有哪些核心需求？" --config kb/config.yaml
+uv run project-kb-query "Client A key requirements" --config kb/config.yaml
 ```
 
 Incremental curated update:
@@ -144,7 +228,7 @@ Structured `source_refs` format:
 
 ```yaml
 source_refs:
-  - source_path: "sources/10_client_inputs/example.pdf"
+  - source_path: "sources/10_client_inputs/sample_proposal.pdf"
     heading: "Page 2"
     chunk_index: 3
     page_number: 2
