@@ -127,6 +127,12 @@ h2 { font-size: 20px; }
 
 .button:hover { transform: translateY(-1px); }
 .button.primary:hover { background: var(--accent-strong); }
+.button:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
 
 .flow {
   display: grid;
@@ -269,6 +275,14 @@ label {
   font-weight: 700;
 }
 
+.muted {
+  color: var(--muted);
+}
+
+.hidden {
+  display: none !important;
+}
+
 .drop-zone {
   border: 2px dashed var(--line);
   border-radius: 8px;
@@ -323,6 +337,12 @@ pre {
   cursor: pointer;
 }
 
+.note-row.active {
+  border-left: 3px solid var(--accent);
+  background: #edf7f4;
+  padding-left: 10px;
+}
+
 .source-ref,
 .evidence-item {
   border-bottom: 1px solid var(--line);
@@ -355,4 +375,3 @@ pre {
     flex-direction: column;
   }
 }
-

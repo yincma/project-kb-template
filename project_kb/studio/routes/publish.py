@@ -22,9 +22,26 @@ async def api_publish_preview(request: Request):
 
 @router.post("/api/publish/confirm")
 async def api_publish_confirm(request: Request):
+    publish_service = request.app.state.publish_service
+
+    def write_publish_report(job_id, result, status):
+        publish_service.write_report(
+            job_id,
+            extra={
+                "job_status": status,
+                "exit_code": result.exit_code,
+                "stdout_preview": result.stdout[-2000:],
+                "stderr_preview": result.stderr[-2000:],
+            },
+        )
+
     try:
-        job_id = request.app.state.job_runner.enqueue_command(job_type="publish", command=CommandEnum.PUBLISH_REVIEWED_DOCS)
+        job_id = request.app.state.job_runner.enqueue_command(
+            job_type="publish",
+            command=CommandEnum.PUBLISH_REVIEWED_DOCS,
+            on_complete=write_publish_report,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    report_path = request.app.state.publish_service.write_report(job_id)
+    report_path = publish_service.report_path(job_id)
     return {"job_id": job_id, "report_path": report_path.relative_to(request.app.state.project_root).as_posix()}

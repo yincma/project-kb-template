@@ -14,6 +14,8 @@
     <p>MCP command valid: {{ agent_status.codex.mcp_command_valid }}</p>
     <button class="button" data-preview-agent="codex">Preview Install</button>
     <button class="button primary" data-confirm-agent="codex">Confirm Install</button>
+    <button class="button" data-test-agent="codex">Test Codex MCP</button>
+    <button class="button" data-prompt-agent="codex">Copy Codex Prompt</button>
   </article>
   <article class="panel">
     <div class="panel-title">Kiro</div>
@@ -21,6 +23,8 @@
     <p>MCP command valid: {{ agent_status.kiro.mcp_command_valid }}</p>
     <button class="button" data-preview-agent="kiro">Preview Install</button>
     <button class="button primary" data-confirm-agent="kiro">Confirm Install</button>
+    <button class="button" data-test-agent="kiro">Test Kiro MCP</button>
+    <button class="button" data-prompt-agent="kiro">Copy Kiro Prompt</button>
   </article>
 </section>
 <section class="panel">
@@ -28,4 +32,3 @@
   <pre id="agent-preview"></pre>
 </section>
 {% endblock %}
-

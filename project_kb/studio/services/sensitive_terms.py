@@ -13,6 +13,38 @@ DEFAULT_FORBIDDEN_TERMS = {
     "真实项目名",
 }
 
+DEFAULT_SCAN_GLOBS = (
+    "README.md",
+    "AGENTS.md",
+    "guides/**/*",
+    "docs/**/*",
+    "tests/**/*",
+    "project_kb/studio/templates/**/*",
+    "project_kb/studio/static/**/*",
+    "obsidian_curator/**/*",
+    ".codex/**/*",
+    ".kiro/**/*",
+    "sample/**/*",
+    "samples/**/*",
+    "examples/**/*",
+    "fixtures/**/*",
+)
+
+TEXT_SUFFIXES = {
+    "",
+    ".css",
+    ".html",
+    ".ini",
+    ".js",
+    ".json",
+    ".md",
+    ".py",
+    ".toml",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
+
 
 def load_sensitive_terms(project_root: Path) -> set[str]:
     terms = set(DEFAULT_FORBIDDEN_TERMS)
@@ -38,6 +70,14 @@ def scan_paths(project_root: Path, paths: list[Path]) -> dict[str, list[str]]:
     return findings
 
 
+def default_scan_paths(project_root: Path) -> list[Path]:
+    paths: list[Path] = []
+    for pattern in DEFAULT_SCAN_GLOBS:
+        for path in project_root.glob(pattern):
+            if path.is_file() and path.suffix.lower() in TEXT_SUFFIXES:
+                paths.append(path)
+    return sorted(set(paths))
+
+
 def _lines(text: str) -> set[str]:
     return {line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")}
-

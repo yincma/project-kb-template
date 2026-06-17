@@ -32,3 +32,19 @@ async def api_confirm_install(agent: str, request: Request):
         return request.app.state.mcp_service.confirm_install(agent)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/agent-hub/{agent}/test")
+async def api_test_agent(agent: str, request: Request):
+    try:
+        return request.app.state.mcp_service.test(agent)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/agent-hub/{agent}/prompt")
+async def api_agent_prompt(agent: str, request: Request):
+    try:
+        return request.app.state.mcp_service.prompt(agent)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

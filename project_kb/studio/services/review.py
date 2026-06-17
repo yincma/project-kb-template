@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import yaml
 
@@ -23,6 +24,8 @@ class NoteRecord:
     source_refs: list[dict[str, Any]]
     warnings: list[str]
     body_preview: str
+    obsidian_path: str
+    obsidian_uri: str
 
 
 class ReviewService:
@@ -51,6 +54,8 @@ class ReviewService:
                 source_refs=source_refs,
                 warnings=warnings,
                 body_preview=body.strip()[:2000],
+                obsidian_path=_obsidian_path(rel_path),
+                obsidian_uri=f"obsidian://open?path={quote(str(path), safe='')}",
             )
             notes.append(record)
             self.store.upsert_note(rel_path=rel_path, status=status, source_refs=source_refs, warnings=warnings)
@@ -62,6 +67,14 @@ class ReviewService:
             if note.id == note_id:
                 return note
         raise ValueError("Note not found.")
+
+    def filter_notes(self, *, status: str | None = None, missing_refs: bool = False) -> list[NoteRecord]:
+        notes = self.scan_notes()
+        if status:
+            notes = [note for note in notes if note.status == status]
+        if missing_refs:
+            notes = [note for note in notes if missing_source_refs(note.source_refs)]
+        return notes
 
     def approve(self, note_id: str, *, override_missing_refs: bool = False, reviewer: str = "project-kb-studio") -> NoteRecord:
         note = self.get_note_by_id(note_id)
@@ -168,3 +181,7 @@ def _title_from_body(body: str, fallback: str) -> str:
             return stripped.lstrip("#").strip() or fallback
     return fallback
 
+
+def _obsidian_path(rel_path: str) -> str:
+    prefix = "docs/"
+    return rel_path[len(prefix) :] if rel_path.startswith(prefix) else rel_path

@@ -39,6 +39,8 @@ Click `Import Sources` from Home or Sources. Studio starts a background job that
 
 Only one heavy job can run at a time. Heavy jobs include import, OCR, curate, publish, and rebuild index.
 
+Curate is not implemented in this MVP. Studio shows the Curate action as unavailable instead of creating a job that is known to fail. Use the CLI or an agent-based curator until a supported curation adapter is added.
+
 ## Chat
 
 Open Chat and ask a question.
@@ -78,13 +80,14 @@ Open Publish to preview what will be published.
 
 Default rules:
 
-- Publish only `status=reviewed`.
+- Publish only `status=reviewed` or `status=approved`.
 - Skip `needs_review`.
 - Skip `evidence_gap`.
 - Skip `possible_duplicate`.
+- Skip Markdown files that do not have a review status in frontmatter.
 - Warn on reviewed notes missing `source_refs`.
 
-Click `Publish Reviewed Docs` to rebuild the curated agent index. Studio writes a report to `.project-kb/jobs/<job_id>/publish_report.json`.
+Click `Publish Reviewed Docs` to rebuild the curated agent index. The ingest layer enforces the same reviewed-only filter as the preview. Studio writes a report to `.project-kb/jobs/<job_id>/publish_report.json` after the job finishes.
 
 ## Configure Codex and Kiro
 
@@ -95,7 +98,8 @@ Before writing config, Studio:
 1. Detects existing config.
 2. Shows a preview or diff.
 3. Creates a timestamped backup.
-4. Writes only after confirmation.
+4. Merges only the `project-kb` MCP server block.
+5. Writes only after confirmation.
 
 Reload Codex or Kiro after changing MCP config.
 
@@ -123,6 +127,8 @@ Studio separates interface language from content language:
 - Content Language: Chinese, Japanese, English, or Follow source language.
 
 Source refs, filenames, and original snippets are never translated.
+
+The default profile is `balanced`. Studio reads profile from `kb/config.yaml`; if the config has no profile, the UI falls back to `balanced`.
 
 External LLM mode is disabled by default. If enabled, only necessary retrieved context is sent to the configured endpoint.
 

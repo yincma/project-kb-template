@@ -25,12 +25,13 @@
     </select>
   </label>
   <label>Profile
-    <select id="profile">
+    <select id="profile" disabled title="Profile is read from kb/config.yaml in this MVP.">
       <option value="lite" {% if settings.profile == "lite" %}selected{% endif %}>lite</option>
       <option value="balanced" {% if settings.profile == "balanced" %}selected{% endif %}>balanced</option>
       <option value="accurate" {% if settings.profile == "accurate" %}selected{% endif %}>accurate</option>
     </select>
   </label>
+  <p class="muted">Profile is read from <code>kb/config.yaml</code>. Default fallback is <code>balanced</code>.</p>
   <label>Default chat source
     <select id="default-chat-source">
       <option value="reviewed" {% if settings.default_chat_source == "reviewed" %}selected{% endif %}>Reviewed Docs</option>
@@ -42,4 +43,3 @@
   <button id="save-settings" class="button primary">{{ t("settings.save") }}</button>
 </section>
 {% endblock %}
-

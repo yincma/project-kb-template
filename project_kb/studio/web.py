@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from kb.store import load_config
+
 from .services.i18n import resolve_lang, translator
 
 
@@ -21,20 +23,31 @@ def template_context(request: Request, **extra):
         "lang": lang,
         "t": t,
         "csrf_token": request.app.state.csrf_token,
-        "settings": default_settings(store.get_settings()),
+        "settings": default_settings(store.get_settings(), request.app.state.project_root),
     }
     context.update(extra)
     return context
 
 
-def default_settings(settings: dict) -> dict:
+def default_settings(settings: dict, project_root=None) -> dict:
     defaults = {
         "ui_language": "follow_browser",
         "content_language": "follow_source",
-        "profile": "lite",
+        "profile": "balanced",
         "ocr": "off",
         "visual_extraction": "off",
         "default_chat_source": "reviewed",
         "external_llm_enabled": False,
     }
-    return {**defaults, **settings}
+    merged = {**defaults, **settings}
+    merged["profile"] = current_config_profile(project_root)
+    return merged
+
+
+def current_config_profile(project_root) -> str:
+    if project_root is None:
+        return "balanced"
+    try:
+        return load_config(project_root / "kb" / "config.yaml").profile
+    except Exception:
+        return "balanced"

@@ -151,3 +151,5 @@ curation:
     - approved
   skip_needs_review: true
   index_non_searchable_visual_summaries: false
+  curated_data_dirs:
+    - docs/_curated_data

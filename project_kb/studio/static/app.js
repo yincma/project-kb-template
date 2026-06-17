@@ -40,7 +40,24 @@
   }
 
   function escapeHtml(value) {
+    value = String(value ?? "");
     return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+  }
+
+  async function copyText(value) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
   }
 
   document.getElementById("chat-form")?.addEventListener("submit", async (event) => {
@@ -48,6 +65,7 @@
     const question = document.getElementById("chat-question").value.trim();
     if (!question) return;
     showMessage(question, "user");
+    showMessage("Loading local evidence search...", "system");
     try {
       const payload = await api("/api/chat/messages", {
         method: "POST",
@@ -112,29 +130,153 @@
     });
   });
 
-  document.querySelectorAll("[data-approve]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      try {
-        await api(`/api/review/${button.getAttribute("data-approve")}/approve`, { method: "POST", body: "{}" });
-        location.reload();
-      } catch (error) {
-        alert(error.message);
-      }
-    });
-  });
+  let currentReviewNote = null;
 
-  document.querySelectorAll("[data-mark-gap]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      await api(`/api/review/${button.getAttribute("data-mark-gap")}/mark-evidence-gap`, { method: "POST", body: "{}" });
-      location.reload();
-    });
-  });
+  function hasMissingSourceRefs(note) {
+    const refs = note?.source_refs || [];
+    return !refs.some((ref) => String(ref.source_path || "").trim());
+  }
 
-  document.querySelectorAll("[data-mark-duplicate]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      await api(`/api/review/${button.getAttribute("data-mark-duplicate")}/mark-duplicate`, { method: "POST", body: "{}" });
-      location.reload();
+  function renderReviewList(items) {
+    const list = document.getElementById("review-note-list");
+    if (!list) return;
+    list.innerHTML = "";
+    items.forEach((note) => {
+      const row = document.createElement("button");
+      row.className = "note-row";
+      row.dataset.noteId = note.id;
+      row.innerHTML = `<span>${escapeHtml(note.title || note.rel_path)}</span><small>${escapeHtml(note.status || "")}</small>`;
+      row.addEventListener("click", () => loadReviewNote(note.id));
+      list.appendChild(row);
     });
+    if (items.length) {
+      loadReviewNote(items[0].id);
+    } else {
+      renderReviewNote(null);
+    }
+  }
+
+  function renderReviewNote(note) {
+    currentReviewNote = note;
+    document.querySelectorAll(".note-row").forEach((row) => {
+      row.classList.toggle("active", note && row.dataset.noteId === note.id);
+    });
+    const title = document.getElementById("review-title");
+    if (!title) return;
+    const path = document.getElementById("review-path");
+    const preview = document.getElementById("review-preview");
+    const refs = document.getElementById("review-source-refs");
+    const warnings = document.getElementById("review-warnings");
+    const obsidianPath = document.getElementById("review-obsidian-path");
+    const obsidianLink = document.getElementById("review-open-obsidian");
+    const overrideRow = document.getElementById("review-override-row");
+    const override = document.getElementById("review-override-missing-refs");
+    const message = document.getElementById("review-action-message");
+    const approve = document.getElementById("review-approve");
+    const gap = document.getElementById("review-mark-gap");
+    const duplicate = document.getElementById("review-mark-duplicate");
+    if (!note) {
+      title.textContent = "No matching notes";
+      path.textContent = "";
+      preview.textContent = "";
+      refs.innerHTML = "";
+      warnings.innerHTML = "";
+      obsidianPath.textContent = "";
+      obsidianLink.href = "#";
+      [approve, gap, duplicate].forEach((button) => { if (button) button.disabled = true; });
+      return;
+    }
+    title.textContent = note.title || note.rel_path;
+    path.textContent = note.rel_path || "";
+    preview.textContent = note.body_preview || "";
+    refs.innerHTML = (note.source_refs || []).map((ref) => (
+      `<div class="source-ref"><code>${escapeHtml(ref.source_path || "")}</code><small>${escapeHtml(ref.heading || "")} chunk=${escapeHtml(String(ref.chunk_index ?? ""))}</small></div>`
+    )).join("") || "<p class=\"muted\">No source_refs</p>";
+    warnings.innerHTML = (note.warnings || []).map((warning) => `<p class="warning">${escapeHtml(warning)}</p>`).join("");
+    obsidianPath.textContent = note.obsidian_path || note.rel_path || "";
+    obsidianLink.href = note.obsidian_uri || "#";
+    const missingRefs = hasMissingSourceRefs(note);
+    overrideRow?.classList.toggle("hidden", !missingRefs || note.status !== "needs_review");
+    if (override) override.checked = false;
+    if (message) message.textContent = missingRefs && note.status === "needs_review" ? "Approve needs explicit override because source_refs are missing." : "";
+    if (approve) approve.disabled = note.status !== "needs_review" || missingRefs;
+    if (gap) gap.disabled = note.status === "reviewed";
+    if (duplicate) duplicate.disabled = note.status === "reviewed";
+  }
+
+  async function loadReviewNote(noteId) {
+    try {
+      const payload = await api(`/api/review-items/${noteId}`);
+      renderReviewNote(payload.note);
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
+  async function refreshReviewList() {
+    const status = document.getElementById("review-status-filter")?.value || "";
+    const missing = document.getElementById("review-missing-source-filter")?.checked;
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    if (missing) params.set("missing_source_refs", "true");
+    const payload = await api(`/api/review-items${params.toString() ? `?${params}` : ""}`);
+    renderReviewList(payload.items || []);
+  }
+
+  document.querySelectorAll(".note-row").forEach((row) => {
+    row.addEventListener("click", () => loadReviewNote(row.dataset.noteId));
+  });
+  if (document.getElementById("review-note-list")) {
+    const first = document.querySelector(".note-row");
+    if (first) loadReviewNote(first.dataset.noteId);
+  }
+  document.getElementById("review-status-filter")?.addEventListener("change", refreshReviewList);
+  document.getElementById("review-missing-source-filter")?.addEventListener("change", refreshReviewList);
+  document.getElementById("review-override-missing-refs")?.addEventListener("change", (event) => {
+    const approve = document.getElementById("review-approve");
+    if (approve && currentReviewNote) {
+      approve.disabled = currentReviewNote.status !== "needs_review" || (hasMissingSourceRefs(currentReviewNote) && !event.target.checked);
+    }
+  });
+  document.getElementById("review-approve")?.addEventListener("click", async () => {
+    if (!currentReviewNote) return;
+    const override = document.getElementById("review-override-missing-refs")?.checked || false;
+    if (override && !confirm("Approve this note without source_refs? A warning will be recorded.")) return;
+    try {
+      const payload = await api(`/api/review/${currentReviewNote.id}/approve`, {
+        method: "POST",
+        body: JSON.stringify({ override_missing_refs: override }),
+      });
+      renderReviewNote(payload.note);
+      await refreshReviewList();
+    } catch (error) {
+      alert(error.message);
+    }
+  });
+  document.getElementById("review-mark-gap")?.addEventListener("click", async () => {
+    if (!currentReviewNote) return;
+    try {
+      const payload = await api(`/api/review/${currentReviewNote.id}/mark-evidence-gap`, { method: "POST", body: "{}" });
+      renderReviewNote(payload.note);
+      await refreshReviewList();
+    } catch (error) {
+      alert(error.message);
+    }
+  });
+  document.getElementById("review-mark-duplicate")?.addEventListener("click", async () => {
+    if (!currentReviewNote) return;
+    try {
+      const payload = await api(`/api/review/${currentReviewNote.id}/mark-duplicate`, { method: "POST", body: "{}" });
+      renderReviewNote(payload.note);
+      await refreshReviewList();
+    } catch (error) {
+      alert(error.message);
+    }
+  });
+  document.getElementById("review-copy-path")?.addEventListener("click", async () => {
+    const value = document.getElementById("review-obsidian-path")?.textContent || "";
+    if (!value) return;
+    await copyText(value);
   });
 
   document.getElementById("publish-button")?.addEventListener("click", async () => {
@@ -161,6 +303,31 @@
       if (!confirm(`Write ${agent} MCP config after backup?`)) return;
       const payload = await api(`/api/agent-hub/${agent}/confirm-install`, { method: "POST", body: "{}" });
       document.getElementById("agent-preview").textContent = JSON.stringify(payload, null, 2);
+    });
+  });
+
+  document.querySelectorAll("[data-test-agent]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const agent = button.getAttribute("data-test-agent");
+      try {
+        const payload = await api(`/api/agent-hub/${agent}/test`, { method: "POST", body: "{}" });
+        document.getElementById("agent-preview").textContent = JSON.stringify(payload, null, 2);
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-prompt-agent]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const agent = button.getAttribute("data-prompt-agent");
+      try {
+        const payload = await api(`/api/agent-hub/${agent}/prompt`, { method: "POST", body: "{}" });
+        await copyText(payload.prompt || "");
+        document.getElementById("agent-preview").textContent = payload.prompt || "";
+      } catch (error) {
+        alert(error.message);
+      }
     });
   });
 

@@ -43,8 +43,7 @@ async def api_import_sources(request: Request):
 
 @router.post("/api/jobs/curate")
 async def api_curate_notes(request: Request):
-    try:
-        job_id = request.app.state.job_runner.enqueue_command(job_type="curate", command=CommandEnum.CURATE_NOTES)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"job_id": job_id, "status": "queued", "capability": "not_implemented"}
+    raise HTTPException(
+        status_code=501,
+        detail="Curate is not implemented in this MVP. Use CLI/Agent curator for now.",
+    )

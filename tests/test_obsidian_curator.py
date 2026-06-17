@@ -122,7 +122,7 @@ def test_curated_config_targets_docs_and_excludes_non_curated_paths(tmp_path: Pa
     ):
         assert pattern in scan["exclude_patterns"]
 
-    _write(tmp_path / "docs" / "10_Clients" / "client.md", "# Client\n")
+    _write(tmp_path / "docs" / "10_Clients" / "client.md", "---\nstatus: reviewed\n---\n\n# Client\n")
     _write(tmp_path / "docs" / ".obsidian" / "workspace.md", "# Workspace\n")
     _write(tmp_path / "docs" / "_templates" / "template.md", "# Template\n")
     _write(tmp_path / "docs" / "99_Inbox" / "draft.md", "# Draft\n")

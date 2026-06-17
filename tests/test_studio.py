@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 import pytest
 import yaml
 
+from kb.ingest import discover_files
+from kb.store import load_config
 from project_kb.studio.app import create_app
 from project_kb.studio.services.chat_service import ChatService
 from project_kb.studio.services.command_runner import CommandEnum, CommandResult, CommandRunner
@@ -17,7 +19,7 @@ from project_kb.studio.services.job_runner import JobRunner
 from project_kb.studio.services.mcp_config import MCPConfigService
 from project_kb.studio.services.publish import PublishService
 from project_kb.studio.services.review import ReviewService
-from project_kb.studio.services.sensitive_terms import load_sensitive_terms, scan_paths
+from project_kb.studio.services.sensitive_terms import default_scan_paths, load_sensitive_terms, scan_paths
 from project_kb.studio.services.state import StateStore
 
 
@@ -282,6 +284,56 @@ def test_publish_report_created(studio_root: Path):
     assert "reviewed_count" in report.read_text(encoding="utf-8")
 
 
+def test_curated_discover_files_filters_review_statuses(studio_root: Path):
+    (studio_root / "kb" / "config.yaml").write_text(
+        """
+project_root: .
+path_base: config_dir
+database:
+  index_role: curated
+scan:
+  source_dirs: [docs]
+  include_patterns: ["**/*.md"]
+curation:
+  skip_needs_review: true
+  index_review_statuses: [reviewed, approved]
+""",
+        encoding="utf-8",
+    )
+    _write_note(studio_root / "docs" / "reviewed.md", status="reviewed", source_path="sources/sample_proposal.pdf")
+    _write_note(studio_root / "docs" / "approved.md", status="approved", source_path="sources/sample_proposal.pdf")
+    _write_note(studio_root / "docs" / "pending.md", status="needs_review", source_path="sources/sample_proposal.pdf")
+    _write_note(studio_root / "docs" / "gap.md", status="evidence_gap", source_path="sources/sample_proposal.pdf")
+    _write_note(studio_root / "docs" / "dup.md", status="possible_duplicate", source_path="sources/sample_proposal.pdf")
+    (studio_root / "docs" / "missing.md").write_text("# Missing status\n", encoding="utf-8")
+
+    files = {path.relative_to(studio_root).as_posix() for path in discover_files(load_config(studio_root / "kb" / "config.yaml"))}
+    assert files == {"docs/approved.md", "docs/reviewed.md"}
+
+
+def test_publish_report_includes_actual_index_state(studio_root: Path):
+    manifest_dir = studio_root / ".lancedb"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.json").write_text(
+        '{"version": 3, "files": {"docs/reviewed.md": {"chunk_count": 1}}}',
+        encoding="utf-8",
+    )
+    _write_note(studio_root / "docs" / "reviewed.md", status="reviewed", source_path="sources/sample_proposal.pdf")
+    store = StateStore(studio_root)
+    service = PublishService(studio_root, store, ReviewService(studio_root, store))
+    job_id = store.create_job(job_type="publish", command={"command": "publish_reviewed_docs"})
+    report = service.write_report(job_id, extra={"job_status": "succeeded"})
+    payload = __import__("json").loads(report.read_text(encoding="utf-8"))
+    assert payload["actual_index"]["indexed_source_paths"] == ["docs/reviewed.md"]
+
+
+def test_curate_api_returns_501_without_creating_job(client: TestClient):
+    response = client.post("/api/jobs/curate", headers=csrf(client), json={})
+    assert response.status_code == 501
+    jobs = client.get("/api/jobs").json()["jobs"]
+    assert jobs == []
+
+
 def test_agent_hub_install_requires_preview_backup_confirm(studio_root: Path):
     config_path = studio_root / ".codex" / "config.toml"
     config_path.parent.mkdir(parents=True)
@@ -293,6 +345,79 @@ def test_agent_hub_install_requires_preview_backup_confirm(studio_root: Path):
     assert result["backup_path"]
     assert (studio_root / result["backup_path"]).exists()
     assert "project-kb" in config_path.read_text(encoding="utf-8")
+
+
+def test_agent_hub_codex_merge_preserves_existing_mcp(studio_root: Path):
+    config_path = studio_root / ".codex" / "config.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        """
+theme = "dark"
+
+[mcp_servers.other]
+command = "other"
+args = ["serve"]
+""",
+        encoding="utf-8",
+    )
+    result = MCPConfigService(studio_root).confirm_install("codex")
+    text = config_path.read_text(encoding="utf-8")
+    assert result["backup_path"]
+    assert 'theme = "dark"' in text
+    assert "[mcp_servers.other]" in text
+    assert '[mcp_servers."project-kb"]' in text
+
+
+def test_agent_hub_kiro_merge_preserves_existing_server(studio_root: Path):
+    config_path = studio_root / ".kiro" / "settings" / "mcp.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        '{"theme": "dark", "mcpServers": {"other": {"command": "other"}}}',
+        encoding="utf-8",
+    )
+    result = MCPConfigService(studio_root).confirm_install("kiro")
+    data = __import__("json").loads(config_path.read_text(encoding="utf-8"))
+    assert result["backup_path"]
+    assert data["theme"] == "dark"
+    assert data["mcpServers"]["other"]["command"] == "other"
+    assert data["mcpServers"]["project-kb"]["command"] == "uv"
+
+
+def test_agent_hub_invalid_config_does_not_overwrite(studio_root: Path):
+    codex_path = studio_root / ".codex" / "config.toml"
+    codex_path.parent.mkdir(parents=True)
+    codex_path.write_text("[invalid", encoding="utf-8")
+    with pytest.raises(ValueError):
+        MCPConfigService(studio_root).confirm_install("codex")
+    assert codex_path.read_text(encoding="utf-8") == "[invalid"
+    assert not list(codex_path.parent.glob("config.toml.bak.*"))
+
+
+def test_agent_hub_test_and_prompt(client: TestClient, studio_root: Path):
+    service = MCPConfigService(studio_root)
+    service.confirm_install("codex")
+    response = client.post("/api/agent-hub/codex/test", headers=csrf(client), json={})
+    assert response.status_code == 200
+    assert response.json()["status"] == "config_check_only"
+    prompt = client.post("/api/agent-hub/codex/prompt", headers=csrf(client), json={})
+    assert prompt.status_code == 200
+    assert "search_project_kb_fast" in prompt.json()["prompt"]
+
+
+def test_review_api_returns_single_note_and_approves_second(client: TestClient, studio_root: Path):
+    _write_note(studio_root / "docs" / "a.md", status="needs_review", source_path="sources/sample_proposal.pdf")
+    _write_note(studio_root / "docs" / "b.md", status="needs_review", source_path="sources/sample_proposal.pdf")
+    items = client.get("/api/review-items").json()["items"]
+    second = items[1]
+    single = client.get(f"/api/review-items/{second['id']}")
+    assert single.status_code == 200
+    assert single.json()["note"]["rel_path"] == "docs/b.md"
+    approved = client.post(f"/api/review/{second['id']}/approve", headers=csrf(client), json={})
+    assert approved.status_code == 200
+    first_frontmatter = yaml.safe_load((studio_root / "docs" / "a.md").read_text(encoding="utf-8").split("---", 2)[1])
+    second_frontmatter = yaml.safe_load((studio_root / "docs" / "b.md").read_text(encoding="utf-8").split("---", 2)[1])
+    assert first_frontmatter["status"] == "needs_review"
+    assert second_frontmatter["status"] == "reviewed"
 
 
 def test_i18n_supports_zh_ja_en():
@@ -326,6 +451,71 @@ def test_saved_ui_language_overrides_old_cookie(client: TestClient):
     assert "ローカルプロジェクト知識ベース" in page.text
 
 
+def test_settings_default_profile_is_balanced(client: TestClient):
+    response = client.get("/api/settings")
+    assert response.status_code == 200
+    assert response.json()["settings"]["profile"] == "balanced"
+
+
+def test_settings_rejects_invalid_enum(client: TestClient):
+    response = client.post("/api/settings", headers=csrf(client), json={"ui_language": "fr"})
+    assert response.status_code == 400
+
+
+def test_settings_rejects_profile_mismatch(client: TestClient):
+    response = client.post("/api/settings", headers=csrf(client), json={"profile": "lite"})
+    assert response.status_code == 400
+
+
+def test_chat_reuses_cached_retriever(monkeypatch, studio_root: Path):
+    class FakeEmbedding:
+        model_name = "fake"
+        batch_size = 1
+        device = None
+        use_fp16 = None
+
+    class FakeCfg:
+        embedding = FakeEmbedding()
+        manifest_path = studio_root / ".lancedb" / "manifest.json"
+
+    class FakeStore:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def table_exists(self):
+            return True
+
+        def count_rows(self):
+            return 1
+
+    class FakeRetriever:
+        def __init__(self, *, config, store, embedder):
+            self.embedder = embedder
+
+        def search(self, *args, **kwargs):
+            return {"results": [], "warnings": []}
+
+    created = {"embedder": 0}
+
+    class FakeEmbedder:
+        def __init__(self, *args, **kwargs):
+            created["embedder"] += 1
+
+    import project_kb.studio.services.chat_service as chat_module
+
+    (studio_root / ".lancedb").mkdir()
+    (studio_root / ".lancedb" / "manifest.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(chat_module, "load_config", lambda path: FakeCfg())
+    monkeypatch.setattr(chat_module, "LanceDBStore", FakeStore)
+    monkeypatch.setattr(chat_module, "ProjectRetriever", FakeRetriever)
+    monkeypatch.setattr(chat_module, "BGEEmbedder", FakeEmbedder)
+
+    service = ChatService(studio_root, StateStore(studio_root))
+    service.ask("one")
+    service.ask("two")
+    assert created["embedder"] == 1
+
+
 def test_sensitive_terms_loaded_from_local_file_or_env(monkeypatch, studio_root: Path):
     local = studio_root / ".project-kb" / "sensitive_terms.local.txt"
     local.parent.mkdir(parents=True, exist_ok=True)
@@ -337,16 +527,12 @@ def test_sensitive_terms_loaded_from_local_file_or_env(monkeypatch, studio_root:
 
 
 def test_no_real_customer_names_in_templates():
-    paths = []
-    for pattern in (
-        "project_kb/studio/templates/*.html",
-        "docs/**/*.md",
-        "tests/**/*.py",
-        "README.md",
-        "guides/**/*.md",
-        "examples/**/*",
-    ):
-        paths.extend(path for path in ROOT.glob(pattern) if path.is_file())
+    paths = default_scan_paths(ROOT)
+    rel_paths = {path.relative_to(ROOT).as_posix() for path in paths}
+    assert "README.md" in rel_paths
+    assert any(path.startswith("project_kb/studio/static/") for path in rel_paths)
+    assert any(path.startswith(".codex/") for path in rel_paths)
+    assert any(path.startswith(".kiro/") for path in rel_paths)
     findings = scan_paths(ROOT, paths)
     assert findings == {}
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import BoundedSemaphore, Lock
 from typing import Any
 
 from kb.embeddings import BGEEmbedder
@@ -15,6 +16,9 @@ class ChatService:
         self.project_root = project_root.resolve()
         self.store = store
         self.max_concurrent_queries = 2
+        self._query_semaphore = BoundedSemaphore(self.max_concurrent_queries)
+        self._cache_lock = Lock()
+        self._retriever_cache: dict[str, dict[str, Any]] = {}
         self.local_answer_engine = None
 
     def ask(
@@ -31,7 +35,8 @@ class ChatService:
         provider = provider or "local_only"
         content_language = content_language or self.store.get_setting("content_language", "follow_source")
 
-        payload = self._evidence_search(question, source_mode=source_mode, search_mode=search_mode)
+        with self._query_semaphore:
+            payload = self._evidence_search(question, source_mode=source_mode, search_mode=search_mode)
         payload["requested_provider"] = provider
         payload["content_language"] = content_language
 
@@ -89,23 +94,15 @@ class ChatService:
         }
 
     def _search_config(self, question: str, *, config_path: str, search_mode: str) -> dict[str, Any]:
-        cfg = load_config(self.project_root / config_path)
+        cfg_path = self.project_root / config_path
+        cfg = load_config(cfg_path)
         store = LanceDBStore(cfg)
         if not store.table_exists() or not store.count_rows():
             return {
                 "evidence": [],
                 "warnings": [f"No searchable index is available for {config_path}. Run import or publish first."],
             }
-        retriever = ProjectRetriever(
-            config=cfg,
-            store=store,
-            embedder=BGEEmbedder(
-                cfg.embedding.model_name,
-                batch_size=cfg.embedding.batch_size,
-                device=cfg.embedding.device,
-                use_fp16=cfg.embedding.use_fp16,
-            ),
-        )
+        retriever, store, warmed = self._retriever_for_config(config_path, cfg=cfg, store=store)
         top_k = 8 if search_mode == "deep" else 5
         candidate_k = 50 if search_mode == "deep" else 20
         payload = retriever.search(question, top_k=top_k, candidate_k=candidate_k, high_precision=(search_mode == "deep"))
@@ -126,7 +123,30 @@ class ChatService:
                     "config_path": config_path,
                 }
             )
-        return {"evidence": evidence, "warnings": list(payload.get("warnings", []))}
+        warnings = list(payload.get("warnings", []))
+        if warmed:
+            warnings.append(f"Loaded local retriever for {config_path}. Later queries will reuse it while the index is unchanged.")
+        return {"evidence": evidence, "warnings": warnings}
+
+    def _retriever_for_config(self, config_path: str, *, cfg, store):
+        cfg_path = self.project_root / config_path
+        signature = _cache_signature(cfg_path, cfg.manifest_path)
+        with self._cache_lock:
+            cached = self._retriever_cache.get(config_path)
+            if cached and cached.get("signature") == signature:
+                return cached["retriever"], cached["store"], False
+            retriever = ProjectRetriever(
+                config=cfg,
+                store=store,
+                embedder=BGEEmbedder(
+                    cfg.embedding.model_name,
+                    batch_size=cfg.embedding.batch_size,
+                    device=cfg.embedding.device,
+                    use_fp16=cfg.embedding.use_fp16,
+                ),
+            )
+            self._retriever_cache[config_path] = {"signature": signature, "retriever": retriever, "store": store}
+            return retriever, store, True
 
 
 def _configs_for_source_mode(source_mode: str) -> list[str]:
@@ -148,3 +168,14 @@ def source_ref_for(result: dict[str, Any]) -> dict[str, Any]:
         "sheet_name": result.get("sheet_name"),
         "cell_range": result.get("cell_range"),
     }
+
+
+def _cache_signature(config_path: Path, manifest_path: Path) -> tuple[float | None, float | None]:
+    return (_mtime(config_path), _mtime(manifest_path))
+
+
+def _mtime(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None

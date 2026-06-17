@@ -236,6 +236,7 @@ class CurationConfig(BaseModel):
     index_review_statuses: list[str] = Field(default_factory=lambda: ["reviewed", "approved"])
     skip_needs_review: bool = True
     index_non_searchable_visual_summaries: bool = False
+    curated_data_dirs: list[str] = Field(default_factory=lambda: ["docs/_curated_data"])
 
 
 class ProjectKBConfig(BaseModel):

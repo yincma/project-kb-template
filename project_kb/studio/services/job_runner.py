@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
-from .command_runner import CommandEnum, CommandRunner
+from .command_runner import CommandEnum, CommandResult, CommandRunner
 from .state import StateStore, utc_now
 
 
@@ -21,14 +21,22 @@ class JobRunner:
         self.command_runner = command_runner
         self.store.mark_running_jobs_interrupted()
 
-    def enqueue_command(self, *, job_type: str, command: CommandEnum, params: dict[str, Any] | None = None, start: bool = True) -> str:
+    def enqueue_command(
+        self,
+        *,
+        job_type: str,
+        command: CommandEnum,
+        params: dict[str, Any] | None = None,
+        start: bool = True,
+        on_complete: Callable[[str, CommandResult, str], None] | None = None,
+    ) -> str:
         if job_type in HEAVY_JOB_TYPES:
             active = self.store.active_heavy_job(HEAVY_JOB_TYPES)
             if active:
                 raise RuntimeError(f"Heavy job already active: {active['id']}")
         job_id = self.store.create_job(job_type=job_type, command={"command": command.value, "params": params or {}})
         if start:
-            thread = threading.Thread(target=self._run_job, args=(job_id, command, params or {}), daemon=True)
+            thread = threading.Thread(target=self._run_job, args=(job_id, command, params or {}, on_complete), daemon=True)
             thread.start()
         return job_id
 
@@ -40,7 +48,13 @@ class JobRunner:
             raise ValueError("Only queued jobs can be cancelled.")
         self.store.update_job(job_id, status="cancelled", finished_at=utc_now())
 
-    def _run_job(self, job_id: str, command: CommandEnum, params: dict[str, Any]) -> None:
+    def _run_job(
+        self,
+        job_id: str,
+        command: CommandEnum,
+        params: dict[str, Any],
+        on_complete: Callable[[str, CommandResult, str], None] | None,
+    ) -> None:
         started = utc_now()
         started_perf = time.perf_counter()
         self.store.update_job(job_id, status="running", started_at=started)
@@ -60,6 +74,8 @@ class JobRunner:
                 finished_at=utc_now(),
                 duration_ms=duration_ms,
             )
+            if on_complete:
+                on_complete(job_id, result, status)
         except Exception as exc:
             duration_ms = int((time.perf_counter() - started_perf) * 1000)
             self._write_log_files(job_id, "", str(exc))
@@ -78,4 +94,3 @@ def _truncate_log(value: str, max_chars: int = 4000) -> str:
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + "\n...[truncated]"
-

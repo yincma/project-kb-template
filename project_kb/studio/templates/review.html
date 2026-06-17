@@ -9,39 +9,52 @@
 
 <section class="review-layout">
   <aside class="panel compact">
-    <div class="panel-title">Pending review</div>
-    {% for note in notes %}
-    <button class="note-row" data-note-id="{{ note.id }}">
-      <span>{{ note.title }}</span>
-      <small>{{ note.status }}</small>
-    </button>
-    {% endfor %}
+    <div class="panel-title">Notes</div>
+    <label>Status
+      <select id="review-status-filter">
+        <option value="">All</option>
+        <option value="needs_review">needs_review</option>
+        <option value="reviewed">reviewed</option>
+        <option value="evidence_gap">evidence_gap</option>
+        <option value="possible_duplicate">possible_duplicate</option>
+      </select>
+    </label>
+    <label class="checkbox"><input id="review-missing-source-filter" type="checkbox"> Missing source_refs</label>
+    <div id="review-note-list">
+      {% for note in notes %}
+      <button class="note-row" data-note-id="{{ note.id }}">
+        <span>{{ note.title }}</span>
+        <small>{{ note.status }}</small>
+      </button>
+      {% endfor %}
+    </div>
   </aside>
   <section class="panel">
     <div class="panel-title">Preview</div>
-    {% if notes %}
-    {% set note = notes[0] %}
-    <h2>{{ note.title }}</h2>
-    <p><code>{{ note.rel_path }}</code></p>
-    <pre class="markdown-preview">{{ note.body_preview }}</pre>
+    <h2 id="review-title">Select a note</h2>
+    <p><code id="review-path"></code></p>
+    <pre id="review-preview" class="markdown-preview"></pre>
+    <label id="review-override-row" class="checkbox hidden">
+      <input id="review-override-missing-refs" type="checkbox">
+      Approve with missing source_refs override
+    </label>
     <div class="actions">
-      <button class="button primary" data-approve="{{ note.id }}">{{ t("review.approve") }}</button>
-      <button class="button" data-mark-gap="{{ note.id }}">Mark Evidence Gap</button>
-      <button class="button" data-mark-duplicate="{{ note.id }}">Mark Duplicate</button>
+      <button id="review-approve" class="button primary" disabled>{{ t("review.approve") }}</button>
+      <button id="review-mark-gap" class="button" disabled>Mark Evidence Gap</button>
+      <button id="review-mark-duplicate" class="button" disabled>Mark Duplicate</button>
     </div>
-    {% endif %}
+    <p id="review-action-message" class="warning"></p>
   </section>
   <aside class="panel compact">
     <div class="panel-title">source_refs</div>
-    {% if notes %}
-      {% for ref in notes[0].source_refs %}
-      <div class="source-ref"><code>{{ ref.source_path }}</code><small>{{ ref.heading }} chunk={{ ref.chunk_index }}</small></div>
-      {% endfor %}
-      {% for warning in notes[0].warnings %}
-      <p class="warning">{{ warning }}</p>
-      {% endfor %}
-    {% endif %}
+    <div id="review-source-refs"></div>
+    <div id="review-warnings"></div>
+    <div class="panel-title">Obsidian</div>
+    <p><code id="review-obsidian-path"></code></p>
+    <div class="actions">
+      <a id="review-open-obsidian" class="button" href="#" target="_blank" rel="noreferrer">{{ t("review.open_obsidian") }}</a>
+      <button id="review-copy-path" class="button" type="button">{{ t("action.copy") }}</button>
+    </div>
   </aside>
 </section>
 {% endblock %}
-

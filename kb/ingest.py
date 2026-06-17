@@ -108,6 +108,8 @@ def index_project(
     warning_count = 0
     chunk_count = 0
     visual_chunk_count = 0
+    indexed_source_paths: list[str] = []
+    skipped_source_paths: list[str] = []
     embedder = None
 
     if not files:
@@ -122,11 +124,13 @@ def index_project(
         previous = manifest.get("files", {}).get(rel_path)
         if previous and previous.get("sha256") == sha256:
             skipped_files += 1
+            skipped_source_paths.append(rel_path)
             continue
 
         parsed = parse_file(path, config=cfg)
         if parsed is None or not parsed.text.strip():
             skipped_files += 1
+            skipped_source_paths.append(rel_path)
             warning_count += len(parsed.warnings if parsed else [])
             for warning in parsed.warnings if parsed else []:
                 console.print(f"[yellow]{warning}[/yellow]")
@@ -146,6 +150,7 @@ def index_project(
         )
         if not chunks:
             skipped_files += 1
+            skipped_source_paths.append(rel_path)
             continue
         visual_chunks = [chunk for chunk in chunks if _metadata_value(chunk, "asset_type") == "visual"]
 
@@ -176,6 +181,7 @@ def index_project(
             "indexed_at": indexed_at,
         }
         indexed_files += 1
+        indexed_source_paths.append(rel_path)
         chunk_count += len(rows)
         visual_chunk_count += len(visual_chunks)
 
@@ -208,6 +214,8 @@ def index_project(
         "chunks": chunk_count,
         "visual_chunks": visual_chunk_count,
         "skipped_files": skipped_files,
+        "indexed_source_paths": indexed_source_paths,
+        "skipped_source_paths": skipped_source_paths,
         "warnings": warning_count,
         "elapsed": elapsed,
     }
@@ -263,7 +271,45 @@ def should_include(
     if any(fnmatch.fnmatch(rel, pattern) for pattern in exclude_patterns):
         if not _reviewed_generated_visual_summary(path, cfg):
             return False
-    return any(fnmatch.fnmatch(rel, pattern) for pattern in include_patterns)
+    if not any(fnmatch.fnmatch(rel, pattern) for pattern in include_patterns):
+        return False
+    return _passes_curated_review_gate(path, rel, cfg)
+
+
+def _passes_curated_review_gate(path: Path, rel: str, cfg) -> bool:
+    if cfg is None:
+        return True
+    database = getattr(cfg, "database", None)
+    curation = getattr(cfg, "curation", None)
+    if getattr(database, "index_role", None) != "curated":
+        return True
+    if not bool(getattr(curation, "skip_needs_review", True)):
+        return True
+    if path.suffix.lower() != ".md":
+        allowed_dirs = [str(value).strip("/").replace("\\", "/") for value in getattr(curation, "curated_data_dirs", [])]
+        return any(rel == prefix or rel.startswith(prefix + "/") for prefix in allowed_dirs if prefix)
+    status = _frontmatter_review_status(path)
+    if not status:
+        return False
+    allowed = {str(value).strip().lower() for value in getattr(curation, "index_review_statuses", ["reviewed", "approved"])}
+    return status in allowed
+
+
+def _frontmatter_review_status(path: Path) -> str | None:
+    try:
+        import yaml
+
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if not text.startswith("---\n"):
+            return None
+        _, yaml_text, _ = text.split("---", 2)
+        data = yaml.safe_load(yaml_text) or {}
+        if not isinstance(data, dict):
+            return None
+        status = data.get("status") or data.get("review_status")
+        return str(status).strip().lower() if status else None
+    except Exception:
+        return None
 
 
 def _reviewed_generated_visual_summary(path: Path, cfg) -> bool:
