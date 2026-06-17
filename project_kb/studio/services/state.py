@@ -126,6 +126,9 @@ class StateStore:
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 source_refs_json TEXT NOT NULL DEFAULT '[]',
+                warnings_json TEXT NOT NULL DEFAULT '[]',
+                mode TEXT,
+                provider TEXT,
                 created_at TEXT NOT NULL
             )
             """,
@@ -172,6 +175,7 @@ class StateStore:
         with self.connect() as conn:
             for statement in schema:
                 conn.execute(statement)
+            self._ensure_schema_columns(conn)
             now = utc_now()
             conn.execute(
                 """
@@ -181,6 +185,23 @@ class StateStore:
                 """,
                 ("default", str(self.project_root), self.project_root.name or "Demo Project", now, now),
             )
+
+    def _ensure_schema_columns(self, conn: sqlite3.Connection) -> None:
+        self._ensure_columns(
+            conn,
+            "chat_messages",
+            {
+                "warnings_json": "TEXT NOT NULL DEFAULT '[]'",
+                "mode": "TEXT",
+                "provider": "TEXT",
+            },
+        )
+
+    def _ensure_columns(self, conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
     def row_to_dict(self, row: sqlite3.Row | None) -> dict[str, Any] | None:
         return None if row is None else dict(row)
@@ -329,4 +350,3 @@ def stable_id(value: str) -> str:
     import hashlib
 
     return hashlib.sha1(value.encode("utf-8")).hexdigest()
-

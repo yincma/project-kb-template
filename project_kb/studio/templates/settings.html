@@ -39,7 +39,6 @@
       <option value="both" {% if settings.default_chat_source == "both" %}selected{% endif %}>Both</option>
     </select>
   </label>
-  <label class="checkbox"><input id="external-llm-enabled" type="checkbox" {% if settings.external_llm_enabled %}checked{% endif %}> External LLM enabled after explicit confirmation</label>
   <button id="save-settings" class="button primary">{{ t("settings.save") }}</button>
 </section>
 {% endblock %}

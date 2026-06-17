@@ -337,7 +337,6 @@
       content_language: document.getElementById("content-language").value,
       profile: document.getElementById("profile").value,
       default_chat_source: document.getElementById("default-chat-source").value,
-      external_llm_enabled: document.getElementById("external-llm-enabled").checked,
     };
     await api("/api/settings", { method: "POST", body: JSON.stringify(payload) });
     location.reload();

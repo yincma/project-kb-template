@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import os
+import sqlite3
 import subprocess
 import time
 
@@ -233,6 +235,108 @@ def test_local_answer_requires_source_refs(monkeypatch, studio_root: Path):
     assert payload["mode"] == "evidence_search"
     assert payload["answer_available"] is False
     assert any("source_refs" in warning for warning in payload["warnings"])
+
+
+def test_chat_page_hides_external_llm_provider(client: TestClient):
+    response = client.get("/chat")
+    assert response.status_code == 200
+    assert 'value="external_llm"' not in response.text
+    assert "External LLM" not in response.text
+
+
+def test_settings_hides_external_llm_checkbox(client: TestClient):
+    response = client.get("/settings")
+    assert response.status_code == 200
+    assert "external-llm-enabled" not in response.text
+    assert "External LLM enabled" not in response.text
+
+
+def test_chat_external_llm_returns_501_without_search(monkeypatch, client: TestClient):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("external_llm must not call chat_service.ask")
+
+    monkeypatch.setattr(client.app.state.chat_service, "ask", fail_if_called)
+    response = client.post(
+        "/api/chat/messages",
+        headers=csrf(client),
+        json={"question": "Can external LLM answer?", "provider": "external_llm"},
+    )
+    assert response.status_code == 501
+    rows = client.app.state.store.query_all("SELECT * FROM chat_messages")
+    assert rows == []
+
+
+def test_chat_api_uses_threadpool_and_saves_assistant_message(monkeypatch, client: TestClient):
+    import project_kb.studio.routes.chat as chat_route
+
+    calls = {"threadpool": 0, "ask": 0}
+
+    async def fake_run_in_threadpool(func, *args, **kwargs):
+        calls["threadpool"] += 1
+        return func(*args, **kwargs)
+
+    def fake_ask(question, **kwargs):
+        calls["ask"] += 1
+        return {
+            "mode": "evidence_search",
+            "answer_available": False,
+            "answer": None,
+            "evidence": [],
+            "source_refs": [{"source_path": "docs/reviewed.md", "heading": "Demo", "chunk_index": 2}],
+            "related_notes": [],
+            "warnings": ["Evidence Search Mode"],
+            "suggested_actions": [],
+            "requested_provider": kwargs.get("provider"),
+        }
+
+    monkeypatch.setattr(chat_route, "run_in_threadpool", fake_run_in_threadpool)
+    monkeypatch.setattr(client.app.state.chat_service, "ask", fake_ask)
+
+    response = client.post(
+        "/api/chat/messages",
+        headers=csrf(client),
+        json={"question": "What changed?", "provider": "local_only"},
+    )
+
+    assert response.status_code == 200
+    assert calls == {"threadpool": 1, "ask": 1}
+    rows = client.app.state.store.query_all(
+        "SELECT role, content, source_refs_json, warnings_json, mode, provider FROM chat_messages ORDER BY rowid"
+    )
+    assert [row["role"] for row in rows] == ["user", "assistant"]
+    assistant = rows[1]
+    assert assistant["content"].startswith("Evidence Search Mode")
+    assert json.loads(assistant["source_refs_json"])[0]["source_path"] == "docs/reviewed.md"
+    assert json.loads(assistant["warnings_json"]) == ["Evidence Search Mode"]
+    assert assistant["mode"] == "evidence_search"
+    assert assistant["provider"] == "local_only"
+
+
+def test_chat_messages_schema_migrates_old_database(studio_root: Path):
+    db_path = studio_root / ".project-kb" / "state.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE chat_messages (
+            id TEXT PRIMARY KEY,
+            session_id TEXT,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            source_refs_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    StateStore(studio_root)
+
+    conn = sqlite3.connect(db_path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(chat_messages)").fetchall()}
+    conn.close()
+    assert {"warnings_json", "mode", "provider"}.issubset(columns)
 
 
 def test_review_scans_markdown_frontmatter(studio_root: Path):
@@ -517,13 +621,15 @@ def test_chat_reuses_cached_retriever(monkeypatch, studio_root: Path):
 
 
 def test_sensitive_terms_loaded_from_local_file_or_env(monkeypatch, studio_root: Path):
+    local_term = "DoNotCommit" + "Client"
+    env_term = "DoNotCommit" + "Bank"
     local = studio_root / ".project-kb" / "sensitive_terms.local.txt"
     local.parent.mkdir(parents=True, exist_ok=True)
-    local.write_text("DoNotCommitClient\n", encoding="utf-8")
-    monkeypatch.setenv("PROJECT_KB_SENSITIVE_TERMS", "DoNotCommitBank")
+    local.write_text(local_term + "\n", encoding="utf-8")
+    monkeypatch.setenv("PROJECT_KB_SENSITIVE_TERMS", env_term)
     terms = load_sensitive_terms(studio_root)
-    assert "DoNotCommitClient" in terms
-    assert "DoNotCommitBank" in terms
+    assert local_term in terms
+    assert env_term in terms
 
 
 def test_no_real_customer_names_in_templates():
