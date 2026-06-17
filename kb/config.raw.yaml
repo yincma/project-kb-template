@@ -86,7 +86,7 @@ parsing:
       extract_embedded_images: true
       render_pages: "auto"
       render_dpi: 180
-      max_rendered_pages_per_file: 30
+      max_rendered_pages_per_file: 90
       max_visual_assets_per_file: 200
       min_page_text_chars: 80
       min_drawing_count_for_render: 8

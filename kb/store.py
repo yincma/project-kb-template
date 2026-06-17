@@ -104,7 +104,7 @@ class MultimodalPDFConfig(BaseModel):
     render_pages: Literal["off", "auto", "all", "keyword_only"] = "off"
     render_all_pages: bool | None = None
     render_dpi: int = 180
-    max_rendered_pages_per_file: int = 30
+    max_rendered_pages_per_file: int = 90
     max_visual_assets_per_file: int = 200
     min_page_text_chars: int = 80
     min_drawing_count_for_render: int = 8

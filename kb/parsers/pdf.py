@@ -83,7 +83,7 @@ def parse_pdf_file(path: Path, config: Any | None = None) -> ParsedDocument:
                 )
             if _multimodal_enabled(config):
                 multimodal_cfg = _cfg_value(_cfg_value(_cfg_value(config, "parsing", None), "multimodal", None), "pdf", None)
-                max_rendered = int(_cfg_value(multimodal_cfg, "max_rendered_pages_per_file", 30) or 30)
+                max_rendered = int(_cfg_value(multimodal_cfg, "max_rendered_pages_per_file", 90) or 90)
                 max_assets = int(_cfg_value(multimodal_cfg, "max_visual_assets_per_file", 200) or 200)
                 if bool(_cfg_value(multimodal_cfg, "extract_embedded_images", True)):
                     for image_number, image_bytes in enumerate(_embedded_images(page, document), start=1):

@@ -374,7 +374,7 @@ parsing:
     enabled: true
     pdf:
       render_pages: "auto"
-      max_rendered_pages_per_file: 30
+      max_rendered_pages_per_file: 90
     vision:
       provider: "ocr_only"
       allow_external_vision: false
